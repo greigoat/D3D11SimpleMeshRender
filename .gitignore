@@ -30,3 +30,18 @@
 *.exe
 *.out
 *.app
+
+# Rider
+.idea
+
+# Visual Studio
+.vs
+*.user
+*.idb
+*.tlog
+*.pdb
+*.res
+*.ilk
+*.log
+*.recipe
+*.FileListAbsolute.txt
