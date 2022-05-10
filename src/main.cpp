@@ -1,23 +1,41 @@
 // C RunTime Header Files
-#include <cstdlib>
-#include <tchar.h>
+#include <memory>
+#include <system_error>
+#include <string>
 
 #define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
-
-#define HRF_RETURN(hr) if (FAILED(hr)) return hr
-
-#include <memory>
-#include <string>
+// ReSharper disable once IdentifierTypo
+#define NOMINMAX
 #include <Windows.h>
 
 #include <atlbase.h>
-#include <comdef.h>
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <vector>
 
 #pragma comment (lib, "d3dcompiler.lib")
 #pragma comment (lib, "d3d11.lib")
+
+
+void DebugLogFormat(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    char szBuffer[512];
+    _vsnprintf_s(szBuffer, 511, format, args);
+
+    OutputDebugStringA(szBuffer);
+
+    va_end(args);
+}
+
+#if defined (DEBUG) || defined(_DEBUG)
+#define DEBUG_LOG_FORMAT(format, ...) DebugLogFormat(format, __VA_ARGS__)
+#else
+#define DEBUG_LOG_FORMAT(format, ...)
+#endif
 
 struct Color4f
 {
@@ -46,7 +64,8 @@ CComPtr<ID3D11Buffer>           g_SampleGeometryVertexBuffer;
 CComPtr<IDXGISwapChain>         g_SwapChain;
 CComPtr<ID3D11Device>           g_Device;
 CComPtr<ID3D11DeviceContext>    g_DeviceContext;
-CComPtr<ID3D11RenderTargetView> g_Backbuffer;
+CComPtr<ID3D11Texture2D>        g_BackBuffer;
+CComPtr<ID3D11RenderTargetView> g_BackBufferView;
 CComPtr<ID3D11VertexShader>     g_VS;
 CComPtr<ID3D11PixelShader>      g_PS;
 
@@ -70,63 +89,159 @@ VertexData g_SampleGeometryVertices[] =
     }
 };
 
-HRESULT SetupD3D11()
+std::string GetHResultMessage(HRESULT hr)
 {
-    UINT creationFlags = 0;
+    return std::system_category().message(hr);
+}
 
-#if defined(_DEBUG)
-    // If the project is in a debug build, enable the debug layer.
-    creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+HRESULT CreateDevice()
+{
+    HRESULT hr = S_OK;
+
+    UINT deviceFlags = 0;
+
+#if defined(DEBUG) || defined(_DEBUG)
+    deviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
-    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-    swapChainDesc.BufferCount = 1;
-    swapChainDesc.OutputWindow = g_SampleWindow;
-    swapChainDesc.BufferDesc.Width = g_SampleWindowWidth;
-    swapChainDesc.BufferDesc.Height = g_SampleWindowHeight;
-    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // 32 bit rgba
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.SampleDesc.Count = 4;
-    swapChainDesc.Windowed = true;
-    swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-
-    HRF_RETURN(D3D11CreateDeviceAndSwapChain(nullptr, // default gpu
+    hr = D3D11CreateDevice(
+        nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
-        creationFlags,
+        deviceFlags,
         nullptr,
         0,
         D3D11_SDK_VERSION,
-        &swapChainDesc,
-        &g_SwapChain,
         &g_Device,
         nullptr,
-        &g_DeviceContext));
+        &g_DeviceContext
+    );
 
-    CComPtr<ID3D11Texture2D> backbuffer;
-    HRF_RETURN(g_SwapChain->GetBuffer(0, IID_PPV_ARGS(&backbuffer)));
-    HRF_RETURN(g_Device->CreateRenderTargetView(backbuffer, nullptr, &g_Backbuffer));
-    g_DeviceContext->OMSetRenderTargets(1, &g_Backbuffer.p, nullptr);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create d3d11 device. %s", GetHResultMessage(hr).c_str());
+        return hr;
+    }
 
-    // setup vp
-    D3D11_VIEWPORT viewport = {};
+    return hr;
+}
+
+HRESULT CreateSwapChain()
+{
+    HRESULT hr = S_OK;
+
+    CComPtr<IDXGIDevice> dxgiDevice;
+    hr = g_Device.QueryInterface(&dxgiDevice);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to query dxgi device interface. %s", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    CComPtr<IDXGIAdapter> adapter;
+    hr = dxgiDevice->GetAdapter(&adapter);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to get dxgi device adapter. %s", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    CComPtr<IDXGIFactory> factory;
+    hr = adapter->GetParent(IID_PPV_ARGS(&factory));
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to get dxgi adapter parent. %s", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    RECT rc;
+    GetClientRect(g_SampleWindow, &rc);
+    UINT width = rc.right - rc.left;
+    UINT height = rc.bottom - rc.top;
+
+
+    DXGI_SWAP_CHAIN_DESC desc{};
+    desc.Windowed = true;
+    desc.BufferCount = 1;
+    desc.BufferDesc.Width = width;
+    desc.BufferDesc.Height = height;
+    desc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_SEQUENTIAL;
+    desc.OutputWindow = g_SampleWindow;
+
+    hr = factory->CreateSwapChain(g_Device, &desc, &g_SwapChain);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create swap chain. %s", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT SetUpBackBuffer()
+{
+    g_BackBuffer.Release();
+    g_BackBufferView.Release();
+    
+    HRESULT hr = g_SwapChain->GetBuffer(0, IID_PPV_ARGS(&g_BackBuffer));
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Couldn't obtain back buffer", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+    
+    hr = g_Device->CreateRenderTargetView(g_BackBuffer, nullptr, &g_BackBufferView);
+
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Couldn't create back buffer view", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+void SetUpViewport()
+{
+    D3D11_TEXTURE2D_DESC backBufferDesc;
+    g_BackBuffer->GetDesc(&backBufferDesc);
+    
+    D3D11_VIEWPORT viewport;
     viewport.TopLeftX = 0;
+    viewport.MinDepth = 0;
+    viewport.MaxDepth = 1;
     viewport.TopLeftY = 0;
-    viewport.Width = g_SampleWindowWidth;
-    viewport.Height = g_SampleWindowHeight;
+    viewport.Width = static_cast<float>(backBufferDesc.Width);
+    viewport.Height = static_cast<float>(backBufferDesc.Height);
 
     g_DeviceContext->RSSetViewports(1, &viewport);
+}
 
+HRESULT InitSample()
+{
     // compile sample shader
     CComPtr<ID3DBlob> vsc, psc;
+    HRESULT           hr = S_OK;
 
-    HRF_RETURN(
-        D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsc, nullptr));
-    HRF_RETURN(
-        D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psc, nullptr));
+    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsc, nullptr);
+    if (FAILED(hr))
+        return hr;
 
-    HRF_RETURN(g_Device->CreateVertexShader(vsc->GetBufferPointer(), vsc->GetBufferSize(), nullptr, &g_VS));
-    HRF_RETURN(g_Device->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &g_PS));
+    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psc, nullptr);
+    if (FAILED(hr))
+        return hr;
+
+    hr = g_Device->CreateVertexShader(vsc->GetBufferPointer(), vsc->GetBufferSize(), nullptr, &g_VS);
+    if (FAILED(hr))
+        return hr;
+
+    hr = g_Device->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &g_PS);
+    if (FAILED(hr))
+        return hr;
 
     g_DeviceContext->VSSetShader(g_VS, nullptr, 0);
     g_DeviceContext->PSSetShader(g_PS, nullptr, 0);
@@ -138,11 +253,16 @@ HRESULT SetupD3D11()
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; // use as a vertex buffer
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; // allow CPU to write in buffer
 
-    g_Device->CreateBuffer(&bd, nullptr, &g_SampleGeometryVertexBuffer);
+    hr = g_Device->CreateBuffer(&bd, nullptr, &g_SampleGeometryVertexBuffer);
+    if (FAILED(hr))
+        return hr;
 
     // map buffer to our data
     D3D11_MAPPED_SUBRESOURCE ms;
-    g_DeviceContext->Map(g_SampleGeometryVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, NULL, &ms);
+    hr = g_DeviceContext->Map(g_SampleGeometryVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, NULL, &ms);
+    if (FAILED(hr))
+        return hr;
+
     memcpy(ms.pData, g_SampleGeometryVertices, sizeof(g_SampleGeometryVertices)); // copy the data
     g_DeviceContext->Unmap(g_SampleGeometryVertexBuffer, NULL); // unmap           
 
@@ -154,18 +274,20 @@ HRESULT SetupD3D11()
     };
 
     CComPtr<ID3D11InputLayout> vertexLayout;
-    g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
-                                vsc->GetBufferPointer(), vsc->GetBufferSize(), &vertexLayout);
+    hr = g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
+                                     vsc->GetBufferPointer(), vsc->GetBufferSize(), &vertexLayout);
+    if (FAILED(hr))
+        return hr;
 
     g_DeviceContext->IASetInputLayout(vertexLayout);
 
-    return S_OK;
+    return hr;
 }
 
 void AppLoop()
 {
     const float clearColor[4] = {g_ClearColor.r, g_ClearColor.g, g_ClearColor.b, g_ClearColor.a};
-    g_DeviceContext->ClearRenderTargetView(g_Backbuffer, clearColor);
+    g_DeviceContext->ClearRenderTargetView(g_BackBufferView, clearColor);
 
     constexpr UINT stride = sizeof(VertexData);
     constexpr UINT offset = 0;
@@ -177,16 +299,42 @@ void AppLoop()
     g_SwapChain->Present(0, 0);
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_SIZE:
+        {
+            //const UINT width = LOWORD(lParam);
+            //const UINT height = HIWORD(lParam);
+
+            g_DeviceContext->OMSetRenderTargets(0, nullptr, nullptr);
+            g_DeviceContext->Flush();
+            
+            g_BackBuffer.Release();
+            g_BackBufferView.Release();
+            
+            g_SwapChain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
+            HRESULT hr = SetUpBackBuffer();
+
+            if (FAILED(hr))
+            {
+                DEBUG_LOG_FORMAT("Failed to set up back buffer during resize event. ", GetHResultMessage(hr).c_str());
+            }
+            else
+            {
+                SetUpViewport();
+                g_DeviceContext->OMSetRenderTargets(1, &g_BackBufferView.p, nullptr);   
+            }
+        }
+        break;
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
+
     return 0;
 }
 
@@ -195,13 +343,16 @@ void CreateSampleWindow(HINSTANCE hInstance)
     WNDCLASSEXW wcx = {};
     wcx.cbSize = sizeof(WNDCLASSEX);
     wcx.style = CS_HREDRAW | CS_VREDRAW;
-    wcx.lpfnWndProc = WndProc;
+    wcx.lpfnWndProc = MsgProc;
     wcx.hInstance = hInstance;
     wcx.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcx.hbrBackground = CreateSolidBrush(RGB(0, 0, 0));
     wcx.lpszClassName = g_SampleWindowClassName;
 
     RegisterClassExW(&wcx);
+
+    RECT rc = {0, 0, g_SampleWindowWidth, g_SampleWindowHeight};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, false);
 
     g_SampleWindow = CreateWindowEx(
         0,
@@ -210,8 +361,8 @@ void CreateSampleWindow(HINSTANCE hInstance)
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        g_SampleWindowWidth,
-        g_SampleWindowHeight,
+        rc.right - rc.left,
+        rc.bottom - rc.top,
         nullptr,
         nullptr,
         hInstance,
@@ -226,18 +377,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+    HRESULT hr = CreateDevice();
+    if (FAILED(hr))
+        return hr;
+
+    InitSample();
+
     CreateSampleWindow(hInstance);
 
     if (!g_SampleWindow)
         return 0;
 
-    HRESULT hr = SetupD3D11();
+    hr = CreateSwapChain();
     if (FAILED(hr))
-    {
-        const _com_error e(hr);
-        OutputDebugString(e.ErrorMessage());
-        return 0;
-    }
+        return hr;
 
     ShowWindow(g_SampleWindow, nShowCmd);
     UpdateWindow(g_SampleWindow);
