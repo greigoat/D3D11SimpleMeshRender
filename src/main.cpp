@@ -96,11 +96,14 @@ const TCHAR*  g_SampleWindowClassName = L"D3D11SimpleMeshRenderClass";
 constexpr int g_SampleWindowWidth = 1024;
 constexpr int g_SampleWindowHeight = 768;
 
-CComPtr<IDXGISwapChain>         g_SwapChain;
-CComPtr<ID3D11Device>           g_Device;
-CComPtr<ID3D11DeviceContext>    g_DeviceContext;
-CComPtr<ID3D11Texture2D>        g_BackBuffer;
-CComPtr<ID3D11RenderTargetView> g_BackBufferView;
+CComPtr<IDXGISwapChain>          g_SwapChain;
+CComPtr<ID3D11Device>            g_Device;
+CComPtr<ID3D11DeviceContext>     g_DeviceContext;
+CComPtr<ID3D11Texture2D>         g_BackBuffer;
+CComPtr<ID3D11RenderTargetView>  g_BackBufferView;
+CComPtr<ID3D11Texture2D>         g_DepthStencilBuffer;
+CComPtr<ID3D11DepthStencilState> g_DepthStencilState;
+CComPtr<ID3D11DepthStencilView> g_DepthStencilView;
 
 CComPtr<ID3D11VertexShader> g_VS;
 CComPtr<ID3D11PixelShader>  g_PS;
@@ -208,6 +211,9 @@ HRESULT SetUpBackBuffer()
 {
     g_BackBuffer.Release();
     g_BackBufferView.Release();
+    g_DepthStencilBuffer.Release();
+    g_DepthStencilState.Release();
+    g_DepthStencilView.Release();
 
     HRESULT hr = g_SwapChain->GetBuffer(0, IID_PPV_ARGS(&g_BackBuffer));
     if (FAILED(hr))
@@ -224,6 +230,69 @@ HRESULT SetUpBackBuffer()
         return hr;
     }
 
+    D3D11_TEXTURE2D_DESC backBufferSurfaceDesc;
+    g_BackBuffer->GetDesc(&backBufferSurfaceDesc);
+    
+    D3D11_TEXTURE2D_DESC descDepth;
+    descDepth.Width = backBufferSurfaceDesc.Width;
+    descDepth.Height = backBufferSurfaceDesc.Height;
+    descDepth.MipLevels = 1;
+    descDepth.ArraySize = 1;
+    descDepth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; //  24 bits for the depth, and 8 bits for the stencil
+    descDepth.SampleDesc.Count = 1;
+    descDepth.SampleDesc.Quality = 0;
+    descDepth.Usage = D3D11_USAGE_DEFAULT;
+    descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL; // this texture will be bound to the OM stage as a depth/stencil buffer
+    descDepth.CPUAccessFlags = 0;
+    descDepth.MiscFlags = 0;
+    
+    hr = g_Device->CreateTexture2D( &descDepth, nullptr, &g_DepthStencilBuffer );
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Couldn't create depth stencil buffer", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+    
+    // Setup depth stencil
+    D3D11_DEPTH_STENCIL_DESC dsDesc;
+
+    // Depth test parameters
+    dsDesc.DepthEnable = true;
+    dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    dsDesc.DepthFunc = D3D11_COMPARISON_LESS;
+
+    // Stencil test parameters
+    dsDesc.StencilEnable = true;
+    dsDesc.StencilReadMask = 0xFF;
+    dsDesc.StencilWriteMask = 0xFF;
+
+    // Stencil operations if pixel is front-facing
+    dsDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    dsDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_INCR;
+    dsDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    dsDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
+    // Stencil operations if pixel is back-facing
+    dsDesc.BackFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    dsDesc.BackFace.StencilDepthFailOp = D3D11_STENCIL_OP_DECR;
+    dsDesc.BackFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    dsDesc.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
+    // Create depth stencil state
+    g_Device->CreateDepthStencilState(&dsDesc, &g_DepthStencilState);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Couldn't create depth stencil state", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    g_Device->CreateDepthStencilView(g_DepthStencilBuffer, nullptr, &g_DepthStencilView);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Couldn't create depth stencil view", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+    
     return hr;
 }
 
@@ -375,39 +444,39 @@ HRESULT InitSample()
 
 void TickSample()
 {
-    static auto  timePrevFrame = std::chrono::high_resolution_clock::now();
-    const auto   timeThisFrame = std::chrono::high_resolution_clock::now();
-    const float deltaTime = std::chrono::duration<float>(timeThisFrame-timePrevFrame).count();
+    static auto timePrevFrame = std::chrono::high_resolution_clock::now();
+    const auto  timeThisFrame = std::chrono::high_resolution_clock::now();
+    const float deltaTime = std::chrono::duration<float>(timeThisFrame - timePrevFrame).count();
     timePrevFrame = timeThisFrame;
 
-    static float spinAngle = 0;
+    static float           spinAngle = 0;
     static constexpr float spinSpeed = 10.0f;
-    spinAngle +=deltaTime * spinSpeed;
-    if (spinAngle > 360.0f)
-    {
-        spinAngle = 0;
-    }
-    
+    spinAngle += deltaTime * spinSpeed;
+    if (spinAngle > 360.0f) { spinAngle = 0; }
+
     DirectX::XMMATRIX modelMatrix = DirectX::XMMatrixRotationY(DirectX::XMConvertToRadians(-spinAngle));
-    
+
     static DirectX::XMVECTOR eye = DirectX::XMVectorSet(0.0f, 0.7f, 3.5f, 0.f);
     const DirectX::XMVECTOR  at = DirectX::XMVectorSet(0.0f, 0, 0.0f, 0.f);
     const DirectX::XMVECTOR  up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.f);
-    DirectX::XMMATRIX viewMatrix = DirectX::XMMatrixLookAtRH(eye, at, up);
-    
+    DirectX::XMMATRIX        viewMatrix = DirectX::XMMatrixLookAtRH(eye, at, up);
+
     PerFrameConstantBufferData cb0 =
     {
         XMMatrixTranspose(modelMatrix * viewMatrix * g_ProjectionMatrix),
     };
-    
+
     ID3D11DeviceContext* ctx = g_DeviceContext;
-    
+
     ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &cb0, 0, 0);
 
+    ctx->OMSetRenderTargets(1, &g_BackBufferView.p, g_DepthStencilView);
+    
     ctx->ClearRenderTargetView(g_BackBufferView, reinterpret_cast<FLOAT*>(&g_ClearColor));
-
-    ctx->OMSetRenderTargets(1, &g_BackBufferView.p, nullptr);
-
+    
+    ctx->ClearDepthStencilView(g_DepthStencilView, D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL, 1.0f, 0);
+    ctx->OMSetDepthStencilState(g_DepthStencilState, 1);
+    
     constexpr UINT vertexBufferStride = sizeof(VertexData);
     constexpr UINT vertexBufferOffset = 0;
     ctx->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &vertexBufferStride, &vertexBufferOffset);
