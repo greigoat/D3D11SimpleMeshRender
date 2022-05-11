@@ -1,21 +1,34 @@
 
-struct VertexOutput
+cbuffer PerFrameBuffer : register(b0)
+{
+    matrix mvpMatrix;
+}
+
+struct VSInput
+{
+    float3 position : POSITION;
+    float3 color : COLOR;
+};
+
+struct PSInput
 {
     float4 position : SV_POSITION;
     float4 color : COLOR;
 };
 
-VertexOutput VSMain(float4 position : POSITION, float4 color : COLOR)
+PSInput VSMain(VSInput IN)
 {
-    VertexOutput output;
+    PSInput OUT;
 
-    output.position = position;
-    output.color = color;
+    float4 temp = float4(IN.position, 1);
+    OUT.position = mul(temp, mvpMatrix);
     
-    return output;
+    OUT.color = float4( IN.color, 1);
+    
+    return OUT;
 }
 
-float4 PSMain(float4 position : SV_POSITION, float4 color : COLOR) : SV_TARGET
+float4 PSMain(PSInput IN) : SV_TARGET
 {
-    return color;
+    return IN.color;
 }

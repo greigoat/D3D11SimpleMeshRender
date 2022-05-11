@@ -1,18 +1,22 @@
-// C RunTime Header Files
+// stl headers
 #include <memory>
 #include <system_error>
 #include <string>
+#include <vector>
+#include <cmath>
 
-#define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
+// Win32 headers
+// Exclude rarely-used stuff from Windows headers
+#define WIN32_LEAN_AND_MEAN             
 // ReSharper disable once IdentifierTypo
 #define NOMINMAX
 #include <Windows.h>
-
 #include <atlbase.h>
 
+// D3D11 headers
 #include <d3d11.h>
 #include <d3dcompiler.h>
-#include <vector>
+#include <DirectXMath.h>
 
 #pragma comment (lib, "d3dcompiler.lib")
 #pragma comment (lib, "d3d11.lib")
@@ -37,20 +41,51 @@ void DebugLogFormat(const char* format, ...)
 #define DEBUG_LOG_FORMAT(format, ...)
 #endif
 
-struct Color4f
-{
-    float r, g, b, a;
-};
-
-struct Vector3f
-{
-    float x, y, z;
-};
-
 struct VertexData
 {
-    Vector3f position;
-    Color4f  color;
+    DirectX::XMFLOAT3 m_Position;
+    DirectX::XMFLOAT3 m_Color;
+};
+
+
+struct PerFrameConstantBufferData
+{
+    DirectX::XMMATRIX m_MvpMatrix;
+};
+
+// Create cube geometry.
+constexpr VertexData g_GeomVerts[] =
+{
+    {DirectX::XMFLOAT3(-0.5f,-0.5f,-0.5f), DirectX::XMFLOAT3(  0,   0,   0),},
+    {DirectX::XMFLOAT3(-0.5f,-0.5f, 0.5f), DirectX::XMFLOAT3(  0,   0,   1),},
+    {DirectX::XMFLOAT3(-0.5f, 0.5f,-0.5f), DirectX::XMFLOAT3(  0,   1,   0),},
+    {DirectX::XMFLOAT3(-0.5f, 0.5f, 0.5f), DirectX::XMFLOAT3(  0,   1,   1),},
+
+    {DirectX::XMFLOAT3( 0.5f,-0.5f,-0.5f), DirectX::XMFLOAT3(  1,   0,   0),},
+    {DirectX::XMFLOAT3( 0.5f,-0.5f, 0.5f), DirectX::XMFLOAT3(  1,   0,   1),},
+    {DirectX::XMFLOAT3( 0.5f, 0.5f,-0.5f), DirectX::XMFLOAT3(  1,   1,   0),},
+    {DirectX::XMFLOAT3( 0.5f, 0.5f, 0.5f), DirectX::XMFLOAT3(  1,   1,   1),},
+};
+    
+constexpr uint16_t g_GeomIndices [] = 
+{
+    0,2,1, // -x
+    1,2,3,
+
+    4,5,6, // +x
+    5,7,6,
+
+    0,1,5, // -y
+    0,5,4,
+
+    2,6,7, // +y
+    2,7,3,
+
+    0,4,6, // -z
+    0,6,2,
+
+    1,3,7, // +z
+    1,7,5,
 };
 
 // Globals
@@ -60,35 +95,22 @@ const TCHAR*  g_SampleWindowClassName = L"D3D11SimpleMeshRenderClass";
 constexpr int g_SampleWindowWidth = 1024;
 constexpr int g_SampleWindowHeight = 768;
 
-CComPtr<ID3D11Buffer>           g_SampleGeometryVertexBuffer;
 CComPtr<IDXGISwapChain>         g_SwapChain;
 CComPtr<ID3D11Device>           g_Device;
 CComPtr<ID3D11DeviceContext>    g_DeviceContext;
 CComPtr<ID3D11Texture2D>        g_BackBuffer;
 CComPtr<ID3D11RenderTargetView> g_BackBufferView;
-CComPtr<ID3D11VertexShader>     g_VS;
-CComPtr<ID3D11PixelShader>      g_PS;
-CComPtr<ID3D11InputLayout>      g_VertexLayout;
-    
-Color4f g_ClearColor = {0, 0, 1, 1};
 
-VertexData g_SampleGeometryVertices[] =
-{
-    {
-        {0.0f, 0.5f, 0.0f},
-        {1.0f, 0.0f, 0.0f, 1.0f}
-    },
+CComPtr<ID3D11VertexShader> g_VS;
+CComPtr<ID3D11PixelShader>  g_PS;
+CComPtr<ID3D11Buffer>       g_SampleGeometryVertexBuffer;
+CComPtr<ID3D11Buffer>       g_SampleGeometryIndexBuffer;
+CComPtr<ID3D11InputLayout>  g_VertexLayout;
+CComPtr<ID3D11Buffer>       g_PerFrameConstantBuffer;
+//DirectX::XMMATRIX           g_ViewMatrix;
+DirectX::XMMATRIX           g_ProjectionMatrix;
 
-    {
-        {0.45f, -0.5, 0.0f},
-        {0.0f, 1.0f, 0.0f, 1.0f}
-    },
-
-    {
-        {-0.45f, -0.5f, 0.0f},
-        {0.0f, 0.0f, 1.0f, 1.0f}
-    }
-};
+DirectX::XMFLOAT4 g_ClearColor = {0, 0, 1, 1};
 
 std::string GetHResultMessage(HRESULT hr)
 {
@@ -223,85 +245,188 @@ void SetUpViewport()
     g_DeviceContext->RSSetViewports(1, &viewport);
 }
 
+void CalculateProjectionMatrix()
+{
+    
+    D3D11_TEXTURE2D_DESC desc;
+    g_BackBuffer->GetDesc(&desc);
+    float aspectRatio = static_cast<float>(desc.Width) / static_cast<float>( desc.Height );
+
+    g_ProjectionMatrix = DirectX::XMMatrixPerspectiveFovRH(
+        2.0f * std::atan(std::tan(DirectX::XMConvertToRadians(70) * 0.5f) / aspectRatio),
+        aspectRatio, 0.01f, 100.0f);
+                
+    //g_ProjectionMatrix = DirectX::XMMatrixIdentity();
+}
+
+/*void CreateViewMatrix()
+{
+    /*
+    DirectX::XMVECTOR eye = DirectX::XMVectorSet(0.0f, 0.7f, 1.5f, 0.f);
+    DirectX::XMVECTOR at  = DirectX::XMVectorSet(0.0f,-0.1f, 0.0f, 0.f);
+    DirectX::XMVECTOR up  = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.f);
+
+    DirectX::XMMATRIX view = XMMatrixTranspose(DirectX::XMMatrixLookAtRH(eye,at,up));
+    #1#
+    
+    g_ViewMatrix = DirectX::XMMatrixIdentity();
+}*/
+
 HRESULT InitSample()
 {
-    // compile sample shader
+    // load and compile shaders
     CComPtr<ID3DBlob> vsc, psc;
     HRESULT           hr = S_OK;
 
     hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsc, nullptr);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed compile vertex shader.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
     hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psc, nullptr);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed compile pixel shader.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
     hr = g_Device->CreateVertexShader(vsc->GetBufferPointer(), vsc->GetBufferSize(), nullptr, &g_VS);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to vreate vertex shader.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
     hr = g_Device->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &g_PS);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create pixel shader.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
-    // Create gpu vertex buffer for our geometry
+    CD3D11_BUFFER_DESC perFrameBufferDesc ={};
+    perFrameBufferDesc.ByteWidth = sizeof(PerFrameConstantBufferData);
+    perFrameBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    
+    hr = g_Device->CreateBuffer(&perFrameBufferDesc,nullptr, &g_PerFrameConstantBuffer);
+
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create per frame constant buffer.", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+    
+    // Create geom vertex buffer
     D3D11_BUFFER_DESC bd = {};
     bd.Usage = D3D11_USAGE_DYNAMIC; // write access access by CPU and GPU
-    bd.ByteWidth = ARRAYSIZE(g_SampleGeometryVertices) * sizeof(VertexData);
+    bd.ByteWidth = ARRAYSIZE(g_GeomVerts) * sizeof(VertexData);
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; // use as a vertex buffer
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; // allow CPU to write in buffer
 
     hr = g_Device->CreateBuffer(&bd, nullptr, &g_SampleGeometryVertexBuffer);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create vertex buffer.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
-    // map buffer to our data
+    // store verts in the vertex buffer
     D3D11_MAPPED_SUBRESOURCE ms;
     hr = g_DeviceContext->Map(g_SampleGeometryVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, NULL, &ms);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to map vertex buffer.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
-    memcpy(ms.pData, g_SampleGeometryVertices, sizeof(g_SampleGeometryVertices)); // copy the data
+    memcpy(ms.pData, g_GeomVerts, sizeof(g_GeomVerts)); // copy the data
     g_DeviceContext->Unmap(g_SampleGeometryVertexBuffer, NULL); // unmap           
 
-    // Create input layout 
+
+    // Create index buffer
+    D3D11_BUFFER_DESC ibd = {};
+    ibd.Usage = D3D11_USAGE_DYNAMIC; // write access access by CPU and GPU
+    ibd.ByteWidth = ARRAYSIZE(g_GeomIndices) * sizeof(uint16_t);
+    ibd.BindFlags = D3D11_BIND_INDEX_BUFFER; // use as a vertex buffer
+    ibd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; // allow CPU to write in buffer
+
+    hr = g_Device->CreateBuffer(&ibd, nullptr, &g_SampleGeometryIndexBuffer);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create index buffer.", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    // store indices in the buffer
+    D3D11_MAPPED_SUBRESOURCE indicesRes;
+    hr = g_DeviceContext->Map(g_SampleGeometryIndexBuffer, 0, D3D11_MAP_WRITE_DISCARD, NULL, &indicesRes);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to map index buffer.", GetHResultMessage(hr).c_str());
+        return hr;
+    }
+
+    memcpy(indicesRes.pData, g_GeomIndices, sizeof(g_GeomIndices)); // copy the data
+    g_DeviceContext->Unmap(g_SampleGeometryIndexBuffer, NULL); // unmap           
+    
+    // Create vertex layout. This is somewhat unrelated to geometry
     D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] =
     {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, sizeof(Vector3f), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, sizeof(DirectX::XMFLOAT3), D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
     
     hr = g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
                                      vsc->GetBufferPointer(), vsc->GetBufferSize(), &g_VertexLayout);
     if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create vertex layout.", GetHResultMessage(hr).c_str());
         return hr;
+    }
 
     return hr;
 }
 
 void TickSample()
 {
-    const float clearColor[4] = {g_ClearColor.r, g_ClearColor.g, g_ClearColor.b, g_ClearColor.a};
+    ID3D11DeviceContext* ctx = g_DeviceContext;
+
+    static DirectX::XMVECTOR eye = DirectX::XMVectorSet(0.0f, 0.7f, 3.5f, 0.f);
+    const DirectX::XMVECTOR at  = DirectX::XMVectorSet(0.0f,0, 0.0f, 0.f);
+    const DirectX::XMVECTOR up  = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.f);
+    
+    DirectX::XMMATRIX view = DirectX::XMMatrixLookAtRH(eye,at,up);
+    
+    PerFrameConstantBufferData cb0 = 
+    {
+        XMMatrixTranspose( DirectX::XMMatrixTranslation(0, 0, 0) * view *  g_ProjectionMatrix ),
+    };
+    
+    ctx->UpdateSubresource( g_PerFrameConstantBuffer, 0, nullptr, &cb0, 0, 0 );
+    
+    ctx->ClearRenderTargetView(g_BackBufferView, reinterpret_cast<FLOAT*>(&g_ClearColor));
+
+    ctx->OMSetRenderTargets(1, &g_BackBufferView.p, nullptr);
+
     constexpr UINT vertexBufferStride = sizeof(VertexData);
     constexpr UINT vertexBufferOffset = 0;
-
-    g_DeviceContext->ClearRenderTargetView(g_BackBufferView, clearColor);
-
-    g_DeviceContext->OMSetRenderTargets(1, &g_BackBufferView.p, nullptr);
+    ctx->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &vertexBufferStride, &vertexBufferOffset);
     
-    g_DeviceContext->VSSetShader(g_VS, nullptr, 0);
-
-    g_DeviceContext->PSSetShader(g_PS, nullptr, 0);
-
-    g_DeviceContext->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &vertexBufferStride, &vertexBufferOffset);
-
-    g_DeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    g_DeviceContext->IASetInputLayout(g_VertexLayout);
+    ctx->VSSetShader(g_VS, nullptr, 0);
     
-    g_DeviceContext->Draw(ARRAYSIZE(g_SampleGeometryVertices), 0);
+    ctx->VSSetConstantBuffers(0, 1, &g_PerFrameConstantBuffer.p);
+    
+    ctx->PSSetShader(g_PS, nullptr, 0);
 
+    ctx->IASetIndexBuffer(g_SampleGeometryIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+    
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    ctx->IASetInputLayout(g_VertexLayout);
+
+    ctx->DrawIndexed(ARRAYSIZE(g_GeomIndices), 0, 0);
     
     g_SwapChain->Present(0, 0);
 }
@@ -323,6 +448,8 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             
             g_SwapChain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
             HRESULT hr = SetUpBackBuffer();
+            
+            CalculateProjectionMatrix();
 
             if (FAILED(hr))
             {
