@@ -68,7 +68,8 @@ CComPtr<ID3D11Texture2D>        g_BackBuffer;
 CComPtr<ID3D11RenderTargetView> g_BackBufferView;
 CComPtr<ID3D11VertexShader>     g_VS;
 CComPtr<ID3D11PixelShader>      g_PS;
-
+CComPtr<ID3D11InputLayout>      g_VertexLayout;
+    
 Color4f g_ClearColor = {0, 0, 1, 1};
 
 VertexData g_SampleGeometryVertices[] =
@@ -162,15 +163,16 @@ HRESULT CreateSwapChain()
 
     DXGI_SWAP_CHAIN_DESC desc{};
     desc.Windowed = true;
-    desc.BufferCount = 1;
+    desc.BufferCount = 2;
     desc.BufferDesc.Width = width;
     desc.BufferDesc.Height = height;
     desc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_SEQUENTIAL;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     desc.OutputWindow = g_SampleWindow;
+    desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     hr = factory->CreateSwapChain(g_Device, &desc, &g_SwapChain);
     if (FAILED(hr))
@@ -243,9 +245,6 @@ HRESULT InitSample()
     if (FAILED(hr))
         return hr;
 
-    g_DeviceContext->VSSetShader(g_VS, nullptr, 0);
-    g_DeviceContext->PSSetShader(g_PS, nullptr, 0);
-
     // Create gpu vertex buffer for our geometry
     D3D11_BUFFER_DESC bd = {};
     bd.Usage = D3D11_USAGE_DYNAMIC; // write access access by CPU and GPU
@@ -272,30 +271,38 @@ HRESULT InitSample()
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
         {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, sizeof(Vector3f), D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-
-    CComPtr<ID3D11InputLayout> vertexLayout;
+    
     hr = g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
-                                     vsc->GetBufferPointer(), vsc->GetBufferSize(), &vertexLayout);
+                                     vsc->GetBufferPointer(), vsc->GetBufferSize(), &g_VertexLayout);
     if (FAILED(hr))
         return hr;
-
-    g_DeviceContext->IASetInputLayout(vertexLayout);
 
     return hr;
 }
 
-void AppLoop()
+void TickSample()
 {
     const float clearColor[4] = {g_ClearColor.r, g_ClearColor.g, g_ClearColor.b, g_ClearColor.a};
+    constexpr UINT vertexBufferStride = sizeof(VertexData);
+    constexpr UINT vertexBufferOffset = 0;
+
     g_DeviceContext->ClearRenderTargetView(g_BackBufferView, clearColor);
 
-    constexpr UINT stride = sizeof(VertexData);
-    constexpr UINT offset = 0;
-    g_DeviceContext->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &stride, &offset);
+    g_DeviceContext->OMSetRenderTargets(1, &g_BackBufferView.p, nullptr);
+    
+    g_DeviceContext->VSSetShader(g_VS, nullptr, 0);
+
+    g_DeviceContext->PSSetShader(g_PS, nullptr, 0);
+
+    g_DeviceContext->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &vertexBufferStride, &vertexBufferOffset);
+
     g_DeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+    g_DeviceContext->IASetInputLayout(g_VertexLayout);
+    
     g_DeviceContext->Draw(ARRAYSIZE(g_SampleGeometryVertices), 0);
 
+    
     g_SwapChain->Present(0, 0);
 }
 
@@ -324,7 +331,6 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             else
             {
                 SetUpViewport();
-                g_DeviceContext->OMSetRenderTargets(1, &g_BackBufferView.p, nullptr);   
             }
         }
         break;
@@ -407,7 +413,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
             if (msg.message == WM_QUIT)
                 break;
         }
-        else { AppLoop(); }
+        else { TickSample(); }
     }
 
     g_SwapChain->SetFullscreenState(false, nullptr);
