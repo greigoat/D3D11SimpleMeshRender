@@ -22,50 +22,81 @@
 #pragma comment (lib, "d3dcompiler.lib")
 #pragma comment (lib, "d3d11.lib")
 
-
-void DebugLogFormat(const char* format, ...)
-{
-    va_list args;
-    va_start(args, format);
-
-    char szBuffer[512];
-    _vsnprintf_s(szBuffer, 511, format, args);
-
-    OutputDebugStringA(szBuffer);
-
-    va_end(args);
-}
-
+// Defines
 #if defined (DEBUG) || defined(_DEBUG)
 #define DEBUG_LOG_FORMAT(format, ...) DebugLogFormat(format, __VA_ARGS__)
 #else
 #define DEBUG_LOG_FORMAT(format, ...)
 #endif
 
+// Structs
+struct DirectionalLightData
+{
+    DirectX::XMFLOAT4 m_Color;
+    DirectX::XMFLOAT3 m_Direction;
+    float m_Attenuation;
+};
+
 struct VertexData
 {
     DirectX::XMFLOAT3 m_Position;
     DirectX::XMFLOAT3 m_Color;
+    DirectX::XMFLOAT3 m_Normal;
 };
 
 
-struct PerFrameConstantBufferData
+struct FrameConstantBufferData
 {
-    DirectX::XMMATRIX m_MvpMatrix;
+    DirectX::XMMATRIX    m_ModelMatrix;
+    DirectX::XMMATRIX    m_MvpMatrix;
+    DirectionalLightData m_DirectionalLightData;
+};
+
+// Globals
+HWND          g_SampleWindow;
+const TCHAR*  g_SampleWindowName = L"D3D11SimpleMeshRender";
+const TCHAR*  g_SampleWindowClassName = L"D3D11SimpleMeshRenderClass";
+constexpr int g_SampleWindowWidth = 1024;
+constexpr int g_SampleWindowHeight = 768;
+
+CComPtr<IDXGISwapChain>          g_SwapChain;
+CComPtr<ID3D11Device>            g_Device;
+CComPtr<ID3D11DeviceContext>     g_DeviceContext;
+CComPtr<ID3D11Texture2D>         g_BackBuffer;
+CComPtr<ID3D11RenderTargetView>  g_BackBufferView;
+CComPtr<ID3D11Texture2D>         g_DepthStencilBuffer;
+CComPtr<ID3D11DepthStencilState> g_DepthStencilState;
+CComPtr<ID3D11DepthStencilView>  g_DepthStencilView;
+
+CComPtr<ID3D11VertexShader> g_VS;
+CComPtr<ID3D11PixelShader>  g_PS;
+CComPtr<ID3D11Buffer>       g_SampleGeometryVertexBuffer;
+CComPtr<ID3D11Buffer>       g_SampleGeometryIndexBuffer;
+CComPtr<ID3D11InputLayout>  g_VertexLayout;
+CComPtr<ID3D11Buffer>       g_PerFrameConstantBuffer;
+DirectX::XMMATRIX           g_ProjectionMatrix;
+DirectX::XMFLOAT4           g_ClearColor = {0.15f, 0.15f, 0.15f, 1};
+constexpr DirectX::XMFLOAT3 g_GeomVertexColor = {1, 1, 1};
+
+DirectionalLightData g_DirectionalLightData
+{
+    {1.0f, 1.0f, 1.0f, 1.0f }, // color
+    {-0.25f, -0.45f, 0 }, // direction
+    1.0f // attenuation
 };
 
 // Create cube geometry.
 constexpr VertexData g_GeomVerts[] =
 {
-    {DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(0, 0, 0),},
-    {DirectX::XMFLOAT3(-0.5f, -0.5f, 0.5f), DirectX::XMFLOAT3(0, 0, 1),},
-    {DirectX::XMFLOAT3(-0.5f, 0.5f, -0.5f), DirectX::XMFLOAT3(0, 1, 0),},
-    {DirectX::XMFLOAT3(-0.5f, 0.5f, 0.5f), DirectX::XMFLOAT3(0, 1, 1),},
+    {DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f),g_GeomVertexColor, {-1, -1, -1}},
+    {DirectX::XMFLOAT3(-0.5f, -0.5f, 0.5f), g_GeomVertexColor, {-1, -1, 1}},
+    {DirectX::XMFLOAT3(-0.5f, 0.5f, -0.5f), g_GeomVertexColor, {-1, 1, -1}},
+    {DirectX::XMFLOAT3(-0.5f, 0.5f, 0.5f), g_GeomVertexColor, {-1, 1, 1}},
 
-    {DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(1, 0, 0),},
-    {DirectX::XMFLOAT3(0.5f, -0.5f, 0.5f), DirectX::XMFLOAT3(1, 0, 1),},
-    {DirectX::XMFLOAT3(0.5f, 0.5f, -0.5f), DirectX::XMFLOAT3(1, 1, 0),},
-    {DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f), DirectX::XMFLOAT3(1, 1, 1),},
+    {DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), g_GeomVertexColor, {1, -1, -1}},
+    {DirectX::XMFLOAT3(0.5f, -0.5f, 0.5f), g_GeomVertexColor, {1, -1, 1}},
+    {DirectX::XMFLOAT3(0.5f, 0.5f, -0.5f), g_GeomVertexColor, {1, 1, -1}},
+    {DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f), g_GeomVertexColor, {1, 1, 1}},
 };
 
 constexpr uint16_t g_GeomIndices[] =
@@ -89,32 +120,19 @@ constexpr uint16_t g_GeomIndices[] =
     1, 7, 5,
 };
 
-// Globals
-HWND          g_SampleWindow;
-const TCHAR*  g_SampleWindowName = L"D3D11SimpleMeshRender";
-const TCHAR*  g_SampleWindowClassName = L"D3D11SimpleMeshRenderClass";
-constexpr int g_SampleWindowWidth = 1024;
-constexpr int g_SampleWindowHeight = 768;
 
-CComPtr<IDXGISwapChain>          g_SwapChain;
-CComPtr<ID3D11Device>            g_Device;
-CComPtr<ID3D11DeviceContext>     g_DeviceContext;
-CComPtr<ID3D11Texture2D>         g_BackBuffer;
-CComPtr<ID3D11RenderTargetView>  g_BackBufferView;
-CComPtr<ID3D11Texture2D>         g_DepthStencilBuffer;
-CComPtr<ID3D11DepthStencilState> g_DepthStencilState;
-CComPtr<ID3D11DepthStencilView> g_DepthStencilView;
+void DebugLogFormat(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
 
-CComPtr<ID3D11VertexShader> g_VS;
-CComPtr<ID3D11PixelShader>  g_PS;
-CComPtr<ID3D11Buffer>       g_SampleGeometryVertexBuffer;
-CComPtr<ID3D11Buffer>       g_SampleGeometryIndexBuffer;
-CComPtr<ID3D11InputLayout>  g_VertexLayout;
-CComPtr<ID3D11Buffer>       g_PerFrameConstantBuffer;
-DirectX::XMMATRIX           g_ProjectionMatrix;
+    char szBuffer[512];
+    _vsnprintf_s(szBuffer, 511, format, args);
 
+    OutputDebugStringA(szBuffer);
 
-DirectX::XMFLOAT4 g_ClearColor = {0, 0, 1, 1};
+    va_end(args);
+}
 
 std::string GetHResultMessage(HRESULT hr) { return std::system_category().message(hr); }
 
@@ -232,7 +250,7 @@ HRESULT SetUpBackBuffer()
 
     D3D11_TEXTURE2D_DESC backBufferSurfaceDesc;
     g_BackBuffer->GetDesc(&backBufferSurfaceDesc);
-    
+
     D3D11_TEXTURE2D_DESC descDepth;
     descDepth.Width = backBufferSurfaceDesc.Width;
     descDepth.Height = backBufferSurfaceDesc.Height;
@@ -242,17 +260,18 @@ HRESULT SetUpBackBuffer()
     descDepth.SampleDesc.Count = 1;
     descDepth.SampleDesc.Quality = 0;
     descDepth.Usage = D3D11_USAGE_DEFAULT;
-    descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL; // this texture will be bound to the OM stage as a depth/stencil buffer
+    descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    // this texture will be bound to the OM stage as a depth/stencil buffer
     descDepth.CPUAccessFlags = 0;
     descDepth.MiscFlags = 0;
-    
-    hr = g_Device->CreateTexture2D( &descDepth, nullptr, &g_DepthStencilBuffer );
+
+    hr = g_Device->CreateTexture2D(&descDepth, nullptr, &g_DepthStencilBuffer);
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Couldn't create depth stencil buffer", GetHResultMessage(hr).c_str());
         return hr;
     }
-    
+
     // Setup depth stencil
     D3D11_DEPTH_STENCIL_DESC dsDesc;
 
@@ -292,7 +311,7 @@ HRESULT SetUpBackBuffer()
         DEBUG_LOG_FORMAT("Couldn't create depth stencil view", GetHResultMessage(hr).c_str());
         return hr;
     }
-    
+
     return hr;
 }
 
@@ -331,14 +350,19 @@ HRESULT InitSample()
     CComPtr<ID3DBlob> vsc, psc;
     HRESULT           hr = S_OK;
 
-    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsc, nullptr);
+    UINT shaderCompilerFlags = 0;
+#if (defined DEBUG || defined _DEBUG)
+    shaderCompilerFlags |= D3DCOMPILE_DEBUG| D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+    
+    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", shaderCompilerFlags, 0, &vsc, nullptr);
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed compile vertex shader.", GetHResultMessage(hr).c_str());
         return hr;
     }
 
-    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psc, nullptr);
+    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", shaderCompilerFlags, 0, &psc, nullptr);
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed compile pixel shader.", GetHResultMessage(hr).c_str());
@@ -360,7 +384,7 @@ HRESULT InitSample()
     }
 
     CD3D11_BUFFER_DESC perFrameBufferDesc = {};
-    perFrameBufferDesc.ByteWidth = sizeof(PerFrameConstantBufferData);
+    perFrameBufferDesc.ByteWidth = sizeof(FrameConstantBufferData);
     perFrameBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 
     hr = g_Device->CreateBuffer(&perFrameBufferDesc, nullptr, &g_PerFrameConstantBuffer);
@@ -427,8 +451,9 @@ HRESULT InitSample()
     // Create vertex layout. This is somewhat unrelated to geometry
     D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] =
     {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, sizeof(DirectX::XMFLOAT3), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT , D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
 
     hr = g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
@@ -461,9 +486,11 @@ void TickSample()
     const DirectX::XMVECTOR  up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.f);
     DirectX::XMMATRIX        viewMatrix = DirectX::XMMatrixLookAtRH(eye, at, up);
 
-    PerFrameConstantBufferData cb0 =
+    FrameConstantBufferData cb0
     {
+        XMMatrixTranspose(modelMatrix),
         XMMatrixTranspose(modelMatrix * viewMatrix * g_ProjectionMatrix),
+        g_DirectionalLightData,
     };
 
     ID3D11DeviceContext* ctx = g_DeviceContext;
@@ -471,12 +498,12 @@ void TickSample()
     ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &cb0, 0, 0);
 
     ctx->OMSetRenderTargets(1, &g_BackBufferView.p, g_DepthStencilView);
-    
+
     ctx->ClearRenderTargetView(g_BackBufferView, reinterpret_cast<FLOAT*>(&g_ClearColor));
-    
-    ctx->ClearDepthStencilView(g_DepthStencilView, D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+    ctx->ClearDepthStencilView(g_DepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
     ctx->OMSetDepthStencilState(g_DepthStencilState, 1);
-    
+
     constexpr UINT vertexBufferStride = sizeof(VertexData);
     constexpr UINT vertexBufferOffset = 0;
     ctx->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &vertexBufferStride, &vertexBufferOffset);
@@ -484,7 +511,8 @@ void TickSample()
     ctx->VSSetShader(g_VS, nullptr, 0);
 
     ctx->VSSetConstantBuffers(0, 1, &g_PerFrameConstantBuffer.p);
-
+    ctx->PSSetConstantBuffers(0, 1, &g_PerFrameConstantBuffer.p);
+    
     ctx->PSSetShader(g_PS, nullptr, 0);
 
     ctx->IASetIndexBuffer(g_SampleGeometryIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
