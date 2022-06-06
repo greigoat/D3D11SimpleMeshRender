@@ -1,17 +1,7 @@
+#include "shared.hlsli"
 
-struct DirectionalLightData
-{
-    float4 color;
-    float3 direction;
-    float attenuation;
-};
-
-cbuffer PerFrameBuffer : register(b0)
-{
-    matrix modelMatrix;
-    matrix mvpMatrix;
-    DirectionalLightData directionalLightData;
-}
+static const float specularGlossiness = 50.0f;
+static const float specularPower = 0.25f;
 
 struct VSInput
 {
@@ -23,6 +13,7 @@ struct VSInput
 struct PSInput
 {
     float4 position : SV_POSITION;
+    float3 viewDir : TEXCOORD2;
     float3 color : COLOR;
     float3 normal : NORMAL;
 };
@@ -32,11 +23,14 @@ PSInput VSMain(VSInput IN)
     PSInput OUT;
 
     float4 temp = float4( IN.position, 1);
-    OUT.position = mul(temp, mvpMatrix);
+    OUT.position = mul(temp, wvpMatrix);
+    
+    float3 worldPosition = mul(temp, worldMatrix);
+    //OUT.worldPosition = mul(temp, worldMatrix);
 
-    //float4 tempNormal = float4(IN.normal, 0);
-   // tempNormal = mul(tempNormal, modelMatrix);
-    OUT.normal = mul(IN.normal, modelMatrix);
+    OUT.viewDir = normalize(worldSpaceCameraPos.xyz - worldPosition);
+    
+    OUT.normal = mul(IN.normal, worldMatrix);
     OUT.color = IN.color;
     
     return OUT;
@@ -44,12 +38,27 @@ PSInput VSMain(VSInput IN)
 
 float4 PSMain(PSInput IN) : SV_TARGET
 {
-    float3 surfaceColor = IN.color;
-    float3 normal = normalize(IN.normal); 
-    float3 lightDirection = -normalize(directionalLightData.direction);
-    float NDotL = max(0.0,dot(normal,lightDirection));
-    float halfLambertDiffuse = pow(NDotL * 0.5 + 0.5,2.0) * surfaceColor;
-    float3 finalColor = halfLambertDiffuse * directionalLightData.attenuation * directionalLightData.color;
+    float3 diffuseColor = IN.color;
+    float3 normalDirection = normalize(IN.normal); 
+    float3 lightDirection = -directionalLightData.direction;
+    
+    float NDotL = saturate(dot(normalDirection,lightDirection));
+    //NDotL = pow(NDotL * 0.5 + 0.5,2.0); // shift light range
+    
+    float3 viewDirection = IN.viewDir;
+    float3 halfDirection = normalize(viewDirection+lightDirection); 
+    
+   // float3 lightReflectDirection = reflect( -lightDirection, normalDirection );
+    //float RDotV = saturate(dot(lightReflectDirection,viewDirection));
 
-    return float4 (finalColor, 1);
+    float NDotV = max(0, dot( normalDirection, halfDirection ));
+    
+    float3 specularity = pow(NDotV, specularGlossiness) * specularPower;
+    float lightingModel = NDotL * diffuseColor + specularity;
+
+    float attenuation= directionalLightData.attenuation;
+    float3 attenColor = attenuation * directionalLightData.color.rgb;
+    float3 finalDiffuse = float4(lightingModel * attenColor,1);
+    
+    return float4 (finalDiffuse, 1);
 }
