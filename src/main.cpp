@@ -1058,6 +1058,7 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             SetUpViewport();
             CalculateProjectionMatrix();
+            ProcessFrame();
         }
         break;
         
