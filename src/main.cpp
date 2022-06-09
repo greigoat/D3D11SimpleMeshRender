@@ -12,6 +12,7 @@
 #include <Windows.h>
 #include <windowsx.h>
 #include <atlbase.h>
+#include <commdlg.h>
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -27,6 +28,9 @@
 #endif
 #undef near
 #undef far
+
+#define IDM_FILE_OPEN 1
+#define IDM_FILE_QUIT 2
 
 // Structs
 struct DirectionalLightData
@@ -117,7 +121,7 @@ CComPtr<ID3D11VertexShader> g_GridVertexShader;
 CComPtr<ID3D11PixelShader>  g_GridPixelShader;
 CComPtr<ID3D11InputLayout>  g_GridVertexLayout;
 
-const char*                 g_ModelFileName = "Data/Models/Suzanne.fbx";
+std::string                 g_ModelFileName = "Data/Models/Suzanne.fbx";
 const wchar_t*              g_ModelShaderFileName = L"Data/Shaders/BlinnPhong.hlsl";
 int                         g_ModelVertexCount;
 CComPtr<ID3D11VertexShader> g_ModelVertexShader;
@@ -128,15 +132,57 @@ CComPtr<ID3D11InputLayout>  g_ModelVertexLayout;
 
 // Forward declarations
 HRESULT CreateMainWindow(HINSTANCE hInstance);
+LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 HRESULT CreateD3DDevice();
 HRESULT CreateSwapChain();
 HRESULT CreateFrameConstantBuffer();
 
+void InitFbxSdk();
+
 HRESULT CreateGrid();
+HRESULT CreateModelShadersAndLayout();
 HRESULT CreateModel();
+void MessageBoxModelLoadError(HWND hWnd, HRESULT hr);
 
 void ProcessFrame();
+
+
+void DebugLogFormat(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    char        buffer[512];
+    std::string fmt = format;
+    fmt += "\n";
+
+    _vsnprintf_s(buffer, 511, fmt.c_str(), args);
+
+    OutputDebugStringA(buffer);
+
+    va_end(args);
+}
+
+template <typename T>
+T Clamp(T val, T min, T max) { return std::min(std::max(val, min), max); }
+
+std::string GetErrorMessage(HRESULT hr) { return std::system_category().message(hr); }
+
+bool DirectoryExists(const char* directory)
+{
+    char fullDir[4096];
+    GetFullPathNameA(directory, 4096, fullDir, nullptr);
+    
+    DWORD attr = GetFileAttributesA(directory);
+    if (attr == INVALID_FILE_ATTRIBUTES)
+        return false;
+
+    if (attr & FILE_ATTRIBUTE_DIRECTORY)
+        return true;
+
+    return false;
+}
 
 
 int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
@@ -159,7 +205,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
     if (FAILED(hr))
         return hr;
 
-    hr = CreateModel();
+    hr = CreateModelShadersAndLayout();
     if (FAILED(hr))
         return hr;
 
@@ -171,8 +217,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
     if (FAILED(hr))
         return hr;
 
+    InitFbxSdk();
+
     ShowWindow(g_MainWindow, nShowCmd);
     UpdateWindow(g_MainWindow);
+
+    if (DirectoryExists("Data/Models/"))
+    {
+        hr = CreateModel();
+        if (FAILED(hr))
+        {
+            MessageBoxModelLoadError(g_MainWindow, hr);
+        }
+    }
 
     MSG msg;
     while (true)
@@ -193,29 +250,60 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
     return static_cast<int>(msg.wParam);
 }
 
-// Utils
-void DebugLogFormat(const char* format, ...)
+HRESULT CreateMainWindow(HINSTANCE hInstance)
 {
-    va_list args;
-    va_start(args, format);
+    HRESULT hr = S_OK;
+    
+    WNDCLASSEXW wcx = {};
+    wcx.cbSize = sizeof(WNDCLASSEX);
+    wcx.style = CS_HREDRAW | CS_VREDRAW;
+    wcx.lpfnWndProc = MsgProc;
+    wcx.hInstance = hInstance;
+    wcx.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wcx.hbrBackground = CreateSolidBrush(RGB(0, 0, 0));
+    wcx.lpszClassName = g_MainWindowClassName;
 
-    char        buffer[512];
-    std::string fmt = format;
-    fmt += "\n";
+    if (!RegisterClassExW(&wcx))
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        DEBUG_LOG_FORMAT("Failed register main window class. %s", GetErrorMessage(hr).c_str());
+    }
+    
+    RECT rc = {0, 0, g_MainWindowWidth, g_MainWindowHeight};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, false);
 
-    _vsnprintf_s(buffer, 511, fmt.c_str(), args);
+    HMENU menuFile = CreateMenu();
+    AppendMenu(menuFile, MF_STRING, IDM_FILE_OPEN, L"&Open");
+    AppendMenu(menuFile, MF_SEPARATOR, 0, nullptr);
+    AppendMenu(menuFile, MF_STRING, IDM_FILE_QUIT, L"&Quit");
 
-    OutputDebugStringA(buffer);
+    HMENU menuBar = CreateMenu();
+    AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(menuFile), L"&File");
+    
+    g_MainWindow = CreateWindowEx(
+        0,
+        g_MainWindowClassName,
+        g_MainWindowTitleName,
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        rc.right - rc.left,
+        rc.bottom - rc.top,
+        nullptr,
+        menuBar,
+        hInstance,
+        nullptr);
 
-    va_end(args);
+    if (!g_MainWindow)
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        DEBUG_LOG_FORMAT("Failed to create main window. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+    
+    return hr;
 }
 
-template <typename T>
-T Clamp(T val, T min, T max) { return std::min(std::max(val, min), max); }
-
-std::string GetErrorMessage(HRESULT hr) { return std::system_category().message(hr); }
-
-// Core
 HRESULT CreateD3DDevice()
 {
     HRESULT hr = S_OK;
@@ -779,15 +867,40 @@ DirectX::XMFLOAT3 GetFbxMeshPolygonVertexColor(FbxMesh* mesh, int vertexId, int 
     };
 }
 
+void InitFbxSdk()
+{
+    g_FbxManager = FbxSharedDestroyPtr<FbxManager>(FbxManager::Create());
+}
+
+HRESULT CreateModelShadersAndLayout()
+{
+    HRESULT           hr = S_OK;
+    CComPtr<ID3DBlob> vsCode, psCode;
+    hr = CompileShaders(g_ModelShaderFileName, &g_ModelVertexShader, &g_ModelPixelShader, &vsCode, &psCode);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to compile shaders for the model.");
+        return hr;
+    }
+
+    hr = CreateVertexLayoutUsingReflection(vsCode, &g_ModelVertexLayout);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create model vertex layout. ");
+        return hr;
+    }
+
+    return hr;
+}
+
 HRESULT CreateModel()
 {
     HRESULT hr = S_OK;
     
-    g_FbxManager = FbxSharedDestroyPtr<FbxManager>(FbxManager::Create());
     FbxSharedDestroyPtr<FbxIOSettings> fbxIOSettings(FbxIOSettings::Create(g_FbxManager, IOSROOT));
-    FbxSharedDestroyPtr<FbxImporter>   fbxImporter(FbxImporter::Create(g_FbxManager, g_ModelFileName));
+    FbxSharedDestroyPtr<FbxImporter>   fbxImporter(FbxImporter::Create(g_FbxManager, g_ModelFileName.c_str()));
 
-    if (!fbxImporter->Initialize(g_ModelFileName, -1, fbxIOSettings))
+    if (!fbxImporter->Initialize(g_ModelFileName.c_str(), -1, fbxIOSettings))
     {
         DEBUG_LOG_FORMAT("Call to FbxImporter::Initialize() failed. %s", fbxImporter->GetStatus().GetErrorString());
         return E_FAIL;
@@ -912,14 +1025,9 @@ HRESULT CreateModel()
 
     g_ModelVertexCount = vertices.size();
 
-    CComPtr<ID3DBlob> vsCode, psCode;
-    hr = CompileShaders(g_ModelShaderFileName, &g_ModelVertexShader, &g_ModelPixelShader, &vsCode, &psCode);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to compile shaders for the model.");
-        return hr;
-    }
-
+    g_ModelIndexBuffer.Release();
+    g_ModelVertexBuffer.Release();
+    
     hr = CreateVertexBuffer(vertices, &g_ModelVertexBuffer);
     if (FAILED(hr))
     {
@@ -931,13 +1039,6 @@ HRESULT CreateModel()
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed to create model index buffer. ");
-        return hr;
-    }
-
-    hr = CreateVertexLayoutUsingReflection(vsCode, &g_ModelVertexLayout);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create model vertex layout. ");
         return hr;
     }
 
@@ -1034,10 +1135,68 @@ void ProcessFrame()
     g_SwapChain->Present(0, 0);
 }
 
+void MessageBoxModelLoadError(HWND hWnd, HRESULT hr)
+{
+    MessageBoxA(hWnd,  (std::string( "Could not open the model. File corrupt or invalid. \n\n" )
+    + GetErrorMessage(hr)).c_str(), "Error", MB_OK|MB_ICONERROR);
+}
+
 LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_COMMAND:
+        {
+            const int menuId = LOWORD(wParam);
+
+            switch (menuId)
+            {
+            case IDM_FILE_OPEN:
+                {
+                    OPENFILENAMEA ofn{};
+                    char szFile[260];       // buffer for file name
+
+                    char initialDir[4096];
+                    GetFullPathNameA("Data/Models/", 4096, initialDir, nullptr);
+                    
+                    ZeroMemory(&ofn, sizeof(ofn));
+                    ofn.lpstrTitle = "Select Model";
+                    ofn.lStructSize = sizeof(ofn);
+                    ofn.hwndOwner = hWnd;
+                    ofn.lpstrFile = szFile;
+                    // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+                    // use the contents of szFile to initialize itself.
+                    ofn.lpstrFile[0] = '\0';
+                    ofn.nMaxFile = sizeof(szFile);
+                    ofn.lpstrFilter = "FBX\0*.FBX\0";
+                    ofn.nFilterIndex = 1;
+                    ofn.lpstrFileTitle = nullptr;
+                    ofn.nMaxFileTitle = 0;
+                    ofn.lpstrInitialDir = initialDir;
+                    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+                    // Display the Open dialog box. 
+
+                    if (GetOpenFileNameA(&ofn))
+                    {
+                        g_ModelFileName = ofn.lpstrFile;
+                        HRESULT hr = CreateModel();
+                        if (FAILED(hr))
+                        {
+                            MessageBoxModelLoadError(hWnd, hr);
+                        }
+                    }
+                }
+                break;
+            case IDM_FILE_QUIT:
+                SendMessage(hWnd, WM_CLOSE, 0, 0);
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+        
     case WM_SIZE:
         {
             g_DeviceContext->OMSetRenderTargets(0, nullptr, nullptr);
@@ -1156,50 +1315,4 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     return 0;
-}
-
-HRESULT CreateMainWindow(HINSTANCE hInstance)
-{
-    HRESULT hr = S_OK;
-    
-    WNDCLASSEXW wcx = {};
-    wcx.cbSize = sizeof(WNDCLASSEX);
-    wcx.style = CS_HREDRAW | CS_VREDRAW;
-    wcx.lpfnWndProc = MsgProc;
-    wcx.hInstance = hInstance;
-    wcx.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wcx.hbrBackground = CreateSolidBrush(RGB(0, 0, 0));
-    wcx.lpszClassName = g_MainWindowClassName;
-
-    if (!RegisterClassExW(&wcx))
-    {
-        hr = HRESULT_FROM_WIN32(GetLastError());
-        DEBUG_LOG_FORMAT("Failed register main window class. %s", GetErrorMessage(hr).c_str());
-    }
-    
-    RECT rc = {0, 0, g_MainWindowWidth, g_MainWindowHeight};
-    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, false);
-
-    g_MainWindow = CreateWindowEx(
-        0,
-        g_MainWindowClassName,
-        g_MainWindowTitleName,
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        rc.right - rc.left,
-        rc.bottom - rc.top,
-        nullptr,
-        nullptr,
-        hInstance,
-        nullptr);
-
-    if (!g_MainWindow)
-    {
-        hr = HRESULT_FROM_WIN32(GetLastError());
-        DEBUG_LOG_FORMAT("Failed to create main window. %s", GetErrorMessage(hr).c_str());
-        return hr;
-    }
-
-    return hr;
 }
