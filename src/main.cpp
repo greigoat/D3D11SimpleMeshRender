@@ -1,30 +1,23 @@
-// stl headers
+// Includes
+#include <vector>
 #include <memory>
 #include <system_error>
 #include <string>
-#include <cmath>
 #include <algorithm>
-#include <fbxsdk.h>
+#include <chrono>
 
-// Win32 headers
-// Exclude rarely-used stuff from Windows headers
 #define WIN32_LEAN_AND_MEAN             
 // ReSharper disable once IdentifierTypo
 #define NOMINMAX
 #include <Windows.h>
 #include <windowsx.h>
-
 #include <atlbase.h>
 
-// D3D11 headers
-#include <chrono>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <DirectXMath.h>
-#include <vector>
 
-#pragma comment (lib, "d3dcompiler.lib")
-#pragma comment (lib, "d3d11.lib")
+#include <fbxsdk.h>
 
 // Defines
 #if defined (DEBUG) || defined(_DEBUG)
@@ -50,27 +43,23 @@ struct VertexData
     DirectX::XMFLOAT3 m_Normal;
 };
 
-
 struct FrameConstantBufferData
 {
     DirectX::XMMATRIX    m_ModelMatrix;
     DirectX::XMMATRIX    m_ViewMatrix;
     DirectX::XMMATRIX    m_MvpMatrix;
-    DirectX::XMFLOAT4 m_WorldSpaceCameraPos;
+    DirectX::XMFLOAT4    m_WorldSpaceCameraPos;
     DirectionalLightData m_DirectionalLightData;
-    DirectX::XMFLOAT4 m_FogColor;
-    DirectX::XMFLOAT2 m_FogRange;
+    DirectX::XMFLOAT4    m_FogColor;
+    DirectX::XMFLOAT2    m_FogRange;
 };
 
-// Typedefs
-
-
 // Globals
-HWND          g_SampleWindow;
-const TCHAR*  g_SampleWindowName = L"D3D11SimpleMeshRender";
-const TCHAR*  g_SampleWindowClassName = L"D3D11SimpleMeshRenderClass";
-constexpr int g_SampleWindowWidth = 1024; // 759;
-constexpr int g_SampleWindowHeight = 768; // 291;
+HWND         g_Window;
+const TCHAR* g_WindowName = L"D3D11SimpleMeshRender";
+const TCHAR* g_WindowClassName = L"D3D11SimpleMeshRenderClass";
+int          g_WindowWidth = 1024; // 759;
+int          g_WindowHeight = 768; // 291;
 
 CComPtr<IDXGISwapChain>          g_SwapChain;
 CComPtr<ID3D11Device>            g_Device;
@@ -83,74 +72,145 @@ CComPtr<ID3D11DepthStencilView>  g_DepthStencilView;
 CComPtr<ID3D11RasterizerState>   g_RasterizerState;
 
 FbxSharedDestroyPtr<FbxManager> g_FbxManager;
-constexpr const char*           g_ModelFileName = "Data/Models/Suzanne.fbx";
 
-int g_GridWidth = 32;
-int g_GridLength = 32;
-CComPtr<ID3D11Buffer> g_GridVertexBuffer;
-CComPtr<ID3D11Buffer> g_GridIndexBuffer;
-CComPtr<ID3D11VertexShader> g_GridVertexShader;
-CComPtr<ID3D11PixelShader> g_GridPixelShader;
-CComPtr<ID3D11InputLayout>  g_GridVertexLayout;
-
-CComPtr<ID3D11VertexShader> g_VS;
-CComPtr<ID3D11PixelShader>  g_PS;
-CComPtr<ID3D11Buffer>       g_SampleGeometryVertexBuffer;
-CComPtr<ID3D11Buffer>       g_SampleGeometryIndexBuffer;
-CComPtr<ID3D11InputLayout>  g_VertexLayout;
-CComPtr<ID3D11Buffer>       g_PerFrameConstantBuffer;
-DirectX::XMMATRIX           g_ProjectionMatrix;
-DirectX::XMFLOAT4           g_ClearColor = {0.5f, 0.5f, 0.5f, 1};
-constexpr DirectX::XMFLOAT3 g_GeomVertexColor = {1, 1, 1};
-
-DirectionalLightData g_DirectionalLightData
+CComPtr<ID3D11Buffer> g_FrameConstantBuffer;
+DirectX::XMMATRIX     g_ProjectionMatrix;
+DirectX::XMFLOAT4     g_ClearColor = {0.5f, 0.5f, 0.5f, 1};
+DirectX::XMFLOAT4     g_FogColor = {0.5f, 0.5f, 0.5f, 1};
+DirectX::XMFLOAT2     g_FogRange = {10.0f, 25.0f};
+DirectionalLightData  g_DirectionalLightData
 {
     {1.0f, 1.0f, 1.0f, 1.0f}, // color
     {0, -0.5f, 0.5f}, // direction
     0.8f // attenuation
 };
 
-DirectX::XMFLOAT4 g_FogColor = { 0.5f,0.5f,0.5f, 1 };
-DirectX::XMFLOAT2 g_FogRange = { 10.0f, 25.0f };
-
 POINTF g_MousePosLastMoveEvent;
 
-DirectX::XMVECTOR g_CameraPos = DirectX::XMVectorSet(0,0,0,0);
-float g_CameraZoom = -2.5f;
-//DirectX::XMVECTOR g_CameraPosZoom = DirectX::XMVectorSet(0,0,0,0);
-float g_CameraPitch = 20.0f;
-float g_CameraYaw = 0.0f;
-float g_CameraZoomMaxSpeed = 0.25f;
-float g_CameraZoomMaxScrollDelta = 120;
-bool g_CameraOrbitEnabled = false;
-float g_CameraOrbitMaxMouseDelta = 10;
-float g_CameraOrbitMaxSpeed = 5.0f;
-bool g_CameraPanEnabled = false;
-float g_CameraPanMaxMouseDelta = 200.0f;
-float g_CameraPanMaxSpeed = 2.0f;
+float             g_CameraFar = 1000.0f;
+float             g_CameraNear = 0.3f;
+float             g_CameraFov = 70.0f;
+DirectX::XMVECTOR g_CameraPos = DirectX::XMVectorSet(0, 0, 0, 0);
+float             g_CameraZoomZ = -2.5f;
+float             g_CameraPitch = 20.0f;
+float             g_CameraYaw = 0.0f;
+float             g_CameraZoomMaxSpeed = 0.25f;
+float             g_CameraZoomMaxScrollDelta = 120;
+bool              g_CameraOrbitEnabled = false;
+float             g_CameraOrbitMaxMouseDelta = 10;
+float             g_CameraOrbitMaxSpeed = 5.0f;
+bool              g_CameraPanEnabled = false;
+float             g_CameraPanMaxMouseDelta = 200.0f;
+float             g_CameraPanMaxSpeed = 2.0f;
 
+int                         g_GridWidth = 32;
+int                         g_GridLength = 32;
+int                         g_GridVertexCount = g_GridWidth * g_GridLength * 8;
+CComPtr<ID3D11Buffer>       g_GridVertexBuffer;
+CComPtr<ID3D11Buffer>       g_GridIndexBuffer;
+CComPtr<ID3D11VertexShader> g_GridVertexShader;
+CComPtr<ID3D11PixelShader>  g_GridPixelShader;
+CComPtr<ID3D11InputLayout>  g_GridVertexLayout;
+
+const char*                 g_ModelFileName = "Data/Models/Suzanne.fbx";
+int                         g_ModelVertexCount;
+CComPtr<ID3D11VertexShader> g_ModelVertexShader;
+CComPtr<ID3D11PixelShader>  g_ModelPixelShader;
+CComPtr<ID3D11Buffer>       g_ModelVertexBuffer;
+CComPtr<ID3D11Buffer>       g_ModelIndexBuffer;
+CComPtr<ID3D11InputLayout>  g_ModelVertexLayout;
+
+// Forward declarations
+HRESULT CreateMainWindow(HINSTANCE hInstance);
+
+HRESULT CreateD3DDevice();
+HRESULT CreateSwapChain();
+HRESULT CreateFrameConstantBuffer();
+
+HRESULT CreateGrid();
+HRESULT CreateModel();
+
+void ProcessFrame();
+
+
+int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
+                      _In_opt_ HINSTANCE hPrevInstance,
+                      _In_ LPWSTR        lpCmdLine,
+                      _In_ int           nShowCmd)
+{
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+
+    HRESULT hr = CreateD3DDevice();
+    if (FAILED(hr))
+        return hr;
+
+    hr = CreateFrameConstantBuffer();
+    if (FAILED(hr))
+        return hr;
+    
+    hr = CreateGrid();
+    if (FAILED(hr))
+        return hr;
+
+    hr = CreateModel();
+    if (FAILED(hr))
+        return hr;
+
+    hr = CreateMainWindow(hInstance);
+    if (FAILED(hr))
+        return hr;
+
+    hr = CreateSwapChain();
+    if (FAILED(hr))
+        return hr;
+
+    ShowWindow(g_Window, nShowCmd);
+    UpdateWindow(g_Window);
+
+    MSG msg;
+    while (true)
+    {
+        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+
+            if (msg.message == WM_QUIT)
+                break;
+        }
+        else { ProcessFrame(); }
+    }
+
+    g_SwapChain->SetFullscreenState(false, nullptr);
+
+    return static_cast<int>(msg.wParam);
+}
+
+// Utils
 void DebugLogFormat(const char* format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    char szBuffer[512];
-    _vsnprintf_s(szBuffer, 511, format, args);
+    char        buffer[512];
+    std::string fmt = format;
+    fmt += "\n";
 
-    OutputDebugStringA(szBuffer);
+    _vsnprintf_s(buffer, 511, fmt.c_str(), args);
+
+    OutputDebugStringA(buffer);
 
     va_end(args);
 }
 
-template<typename T>
-T Clamp(T val, T min, T max)
-{
-    return std::min( std::max(val, min), max);
-}
+template <typename T>
+T Clamp(T val, T min, T max) { return std::min(std::max(val, min), max); }
 
-std::string GetHResultMessage(HRESULT hr) { return std::system_category().message(hr); }
+std::string GetErrorMessage(HRESULT hr) { return std::system_category().message(hr); }
 
-HRESULT CreateDevice()
+// Core
+HRESULT CreateD3DDevice()
 {
     HRESULT hr = S_OK;
 
@@ -175,7 +235,7 @@ HRESULT CreateDevice()
 
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create d3d11 device. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create d3d11 device. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
@@ -190,7 +250,7 @@ HRESULT CreateSwapChain()
     hr = g_Device.QueryInterface(&dxgiDevice);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to query dxgi device interface. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to query dxgi device interface. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
@@ -198,7 +258,7 @@ HRESULT CreateSwapChain()
     hr = dxgiDevice->GetAdapter(&adapter);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to get dxgi device adapter. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to get dxgi device adapter. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
@@ -206,12 +266,12 @@ HRESULT CreateSwapChain()
     hr = adapter->GetParent(IID_PPV_ARGS(&factory));
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to get dxgi adapter parent. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to get dxgi adapter parent. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
     RECT rc;
-    GetClientRect(g_SampleWindow, &rc);
+    GetClientRect(g_Window, &rc);
     UINT width = rc.right - rc.left;
     UINT height = rc.bottom - rc.top;
 
@@ -226,13 +286,13 @@ HRESULT CreateSwapChain()
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    desc.OutputWindow = g_SampleWindow;
+    desc.OutputWindow = g_Window;
     desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     hr = factory->CreateSwapChain(g_Device, &desc, &g_SwapChain);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create swap chain. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create swap chain. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
@@ -251,7 +311,7 @@ HRESULT SetUpBackBuffer()
     HRESULT hr = g_SwapChain->GetBuffer(0, IID_PPV_ARGS(&g_BackBuffer));
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Couldn't obtain back buffer %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Couldn't obtain back buffer. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
@@ -259,64 +319,59 @@ HRESULT SetUpBackBuffer()
 
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Couldn't create back buffer view %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Couldn't create back buffer view. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
-    D3D11_TEXTURE2D_DESC backBufferSurfaceDesc;
-    g_BackBuffer->GetDesc(&backBufferSurfaceDesc);
+    D3D11_TEXTURE2D_DESC backBufferDesc;
+    g_BackBuffer->GetDesc(&backBufferDesc);
 
-    D3D11_TEXTURE2D_DESC descDepth;
-    descDepth.Width = backBufferSurfaceDesc.Width;
-    descDepth.Height = backBufferSurfaceDesc.Height;
-    descDepth.MipLevels = 1;
-    descDepth.ArraySize = 1;
-    descDepth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; //  24 bits for the depth, and 8 bits for the stencil
-    descDepth.SampleDesc.Count = 1;
-    descDepth.SampleDesc.Quality = 0;
-    descDepth.Usage = D3D11_USAGE_DEFAULT;
-    descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    // this texture will be bound to the OM stage as a depth/stencil buffer
-    descDepth.CPUAccessFlags = 0;
-    descDepth.MiscFlags = 0;
+    D3D11_TEXTURE2D_DESC depthStencilBufferDesc;
+    depthStencilBufferDesc.Width = backBufferDesc.Width;
+    depthStencilBufferDesc.Height = backBufferDesc.Height;
+    depthStencilBufferDesc.MipLevels = 1;
+    depthStencilBufferDesc.ArraySize = 1;
+    depthStencilBufferDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; //  24 bits for the depth, 8 bits for the stencil
+    depthStencilBufferDesc.SampleDesc.Count = 1;
+    depthStencilBufferDesc.SampleDesc.Quality = 0;
+    depthStencilBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    depthStencilBufferDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    depthStencilBufferDesc.CPUAccessFlags = 0;
+    depthStencilBufferDesc.MiscFlags = 0;
 
-    hr = g_Device->CreateTexture2D(&descDepth, nullptr, &g_DepthStencilBuffer);
+    hr = g_Device->CreateTexture2D(&depthStencilBufferDesc, nullptr, &g_DepthStencilBuffer);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Couldn't create depth stencil buffer %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Couldn't create depth stencil buffer. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
-    // Setup depth stencil
-    /*D3D11_DEPTH_STENCIL_DESC dsDesc;
+    D3D11_DEPTH_STENCIL_DESC depthStencilDesc;
 
-    // Depth test parameters
-    dsDesc.DepthEnable = true;
-    dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-    dsDesc.DepthFunc = D3D11_COMPARISON_LESS;
+    depthStencilDesc.DepthEnable = true;
+    depthStencilDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    depthStencilDesc.DepthFunc = D3D11_COMPARISON_LESS;
 
-    // Stencil test parameters
-    dsDesc.StencilEnable = true;
-    dsDesc.StencilReadMask = 0xFF;
-    dsDesc.StencilWriteMask = 0xFF;
+    depthStencilDesc.StencilEnable = true;
+    depthStencilDesc.StencilReadMask = 0xFF;
+    depthStencilDesc.StencilWriteMask = 0xFF;
 
-    // Create depth stencil state
-    g_Device->CreateDepthStencilState(&dsDesc, &g_DepthStencilState);
+    g_Device->CreateDepthStencilState(&depthStencilDesc, &g_DepthStencilState);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Couldn't create depth stencil state %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Couldn't create depth stencil state. %s", GetErrorMessage(hr).c_str());
         return hr;
-    }*/
+    }
 
     g_Device->CreateDepthStencilView(g_DepthStencilBuffer, nullptr, &g_DepthStencilView);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Couldn't create depth stencil view %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Couldn't create depth stencil view. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
 
     D3D11_RASTERIZER_DESC desc;
-    desc.AntialiasedLineEnable = TRUE;
+    desc.AntialiasedLineEnable = false;
     desc.CullMode = D3D11_CULL_BACK;
     desc.DepthBias = 0;
     desc.DepthBiasClamp = 0.0f;
@@ -325,11 +380,219 @@ HRESULT SetUpBackBuffer()
     desc.MultisampleEnable = false;
     desc.ScissorEnable = FALSE;
     desc.SlopeScaledDepthBias = 0.0f;
-    
+
     hr = g_Device->CreateRasterizerState(&desc, &g_RasterizerState);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Couldn't create rasterizer state %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Couldn't create rasterizer state. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT CreateFrameConstantBuffer()
+{
+    HRESULT hr = S_OK;
+    
+    CD3D11_BUFFER_DESC perFrameBufferDesc = {};
+    perFrameBufferDesc.ByteWidth = sizeof(FrameConstantBufferData);
+    perFrameBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+
+    hr = g_Device->CreateBuffer(&perFrameBufferDesc, nullptr, &g_FrameConstantBuffer);
+
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create frame constant buffer. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT CompileShaders(
+    const std::wstring& fileName,
+    ID3D11VertexShader** outVS,
+    ID3D11PixelShader** outPS,
+    ID3DBlob** outVSCode,
+    ID3DBlob** outPSCode)
+{
+    HRESULT           hr = S_OK;
+    CComPtr<ID3DBlob> errors;
+
+    UINT shaderCompilerFlags = 0;
+#if (defined DEBUG || defined _DEBUG)
+    shaderCompilerFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+
+    hr = D3DCompileFromFile(fileName.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VSMain", "vs_5_0",
+                            shaderCompilerFlags, 0,
+                            outVSCode, &errors.p);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed compile vertex shader. %s %s", GetErrorMessage(hr).c_str(),
+                         static_cast<char*>(errors->GetBufferPointer()));
+        return hr;
+    }
+
+    hr = g_Device->CreateVertexShader((*outVSCode)->GetBufferPointer(), (*outVSCode)->GetBufferSize(), nullptr, outVS);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create vertex shader. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    hr = D3DCompileFromFile(fileName.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PSMain", "ps_5_0",
+                            shaderCompilerFlags, 0,
+                            outPSCode, &errors.p);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed compile pixel shader. %s %s", GetErrorMessage(hr).c_str(),
+                         static_cast<char*>(errors->GetBufferPointer()));
+        return hr;
+    }
+
+    hr = g_Device->CreatePixelShader((*outPSCode)->GetBufferPointer(), (*outPSCode)->GetBufferSize(), nullptr, outPS);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create pixel shader. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+template<typename TVertex>
+HRESULT CreateVertexBuffer(std::vector<TVertex> vertices, ID3D11Buffer** outBuffer)
+{
+    HRESULT hr = S_OK;
+    
+    D3D11_BUFFER_DESC vertexBufferDesc{};
+    vertexBufferDesc.ByteWidth = vertices.size() * sizeof(TVertex);
+    vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+
+    const D3D11_SUBRESOURCE_DATA vertexData{vertices.data()};
+
+    hr = g_Device->CreateBuffer(&vertexBufferDesc, &vertexData, outBuffer);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create vertex buffer. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT CreateIndexBuffer(std::vector<uint32_t> indices, ID3D11Buffer** outBuffer)
+{
+    HRESULT hr = S_OK;
+    
+    D3D11_BUFFER_DESC indexBufferDesc{};
+    indexBufferDesc.ByteWidth = indices.size() * sizeof(uint32_t);
+    indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+
+    const D3D11_SUBRESOURCE_DATA indexData{indices.data()};
+
+    hr = g_Device->CreateBuffer(&indexBufferDesc, &indexData, outBuffer);
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create index buffer. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT CreateVertexLayoutUsingReflection( ID3DBlob* vsCode, ID3D11InputLayout** outVertexLayout )
+{
+    HRESULT hr = S_OK;
+    
+    // Reflect shader info
+    CComPtr<ID3D11ShaderReflection> vertexShaderReflection;
+    hr = D3DReflect(vsCode->GetBufferPointer(), vsCode->GetBufferSize(), IID_PPV_ARGS(&vertexShaderReflection));
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Call to D3DReflect failed. %s", GetErrorMessage(hr).c_str());
+        return hr;
+    }
+
+    // Get shader info
+    D3D11_SHADER_DESC shaderDesc;
+    vertexShaderReflection->GetDesc(&shaderDesc);
+
+    // Read input layout description from shader info
+    std::vector<D3D11_INPUT_ELEMENT_DESC> inputLayoutDesc;
+    for (uint32_t i = 0; i < shaderDesc.InputParameters; i++)
+    {
+        D3D11_SIGNATURE_PARAMETER_DESC paramDesc;
+        vertexShaderReflection->GetInputParameterDesc(i, &paramDesc);
+
+        // fill out input element desc
+        D3D11_INPUT_ELEMENT_DESC elementDesc;
+        elementDesc.SemanticName = paramDesc.SemanticName;
+        elementDesc.SemanticIndex = paramDesc.SemanticIndex;
+        elementDesc.InputSlot = 0;
+        elementDesc.AlignedByteOffset = D3D11_APPEND_ALIGNED_ELEMENT;
+        elementDesc.InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+        elementDesc.InstanceDataStepRate = 0;
+
+        // determine DXGI format
+        if (paramDesc.Mask == 1)
+        {
+            if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32) elementDesc.Format = DXGI_FORMAT_R32_UINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32_SINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32_FLOAT;
+        }
+        else if (paramDesc.Mask <= 3)
+        {
+            if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32) elementDesc.Format = DXGI_FORMAT_R32G32_UINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32_SINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32_FLOAT;
+        }
+        else if (paramDesc.Mask <= 7)
+        {
+            if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32B32_UINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32B32_SINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32B32_FLOAT;
+        }
+        else if (paramDesc.Mask <= 15)
+        {
+            if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32B32A32_UINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32B32A32_SINT;
+            else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32)
+                elementDesc.Format =
+                    DXGI_FORMAT_R32G32B32A32_FLOAT;
+        }
+
+        //save element desc
+        inputLayoutDesc.push_back(elementDesc);
+    }
+
+    // Try to create Input Layout
+    hr = g_Device->CreateInputLayout(&inputLayoutDesc[0], inputLayoutDesc.size(), vsCode->GetBufferPointer(),
+                                           vsCode->GetBufferSize(), outVertexLayout);
+
+    if (FAILED(hr))
+    {
+        DEBUG_LOG_FORMAT("Failed to create vertex layout. %s", GetErrorMessage(hr).c_str());
         return hr;
     }
     
@@ -354,209 +617,116 @@ void SetUpViewport()
 
 void CalculateProjectionMatrix()
 {
-    D3D11_TEXTURE2D_DESC desc;
-    g_BackBuffer->GetDesc(&desc);
-    float aspectRatio = static_cast<float>(desc.Width) / static_cast<float>(desc.Height);
+    D3D11_TEXTURE2D_DESC backBufferDesc;
+    g_BackBuffer->GetDesc(&backBufferDesc);
+
+    const float aspectRatio = static_cast<float>(backBufferDesc.Width) / static_cast<float>(backBufferDesc.Height);
+    const float zRange = g_CameraFar - g_CameraNear;
+    const float tanHalfFov = tanf(DirectX::XMConvertToRadians(g_CameraFov * 0.5f));
     
-    DirectX::XMFLOAT4X4 m{};
-    float zFar = 1000.0f;
-    float zNear = 0.3f;
-    float fov = 70.0f;
-    float zRange = zFar - zNear;
-    float degToRad = 0.01745329f;
-    float tanHalfFov = tanf(fov * 0.5f * degToRad); 
+    DirectX::XMFLOAT4X4 projectionMatrix = {};
+    projectionMatrix.m[0][0] = 1 / (tanHalfFov * aspectRatio);
+    projectionMatrix.m[1][1] = 1 / tanHalfFov;
+    projectionMatrix.m[2][2] = g_CameraFar / zRange;
+    projectionMatrix.m[3][2] = -g_CameraFar * g_CameraNear / zRange;
+    projectionMatrix.m[2][3] = 1;
 
-    float ar = aspectRatio;
-
-    m.m[0][0] = 1 / ( tanHalfFov * ar );
-    m.m[1][1] = 1 / tanHalfFov;
-    m.m[2][2] = zFar / (zFar - zNear);
-    m.m[3][2] = -zFar * zNear / (zFar - zNear);
-    m.m[2][3] = 1;
-    
-    g_ProjectionMatrix = DirectX::XMLoadFloat4x4(&m);
-    
-    /*g_ProjectionMatrix = DirectX::XMMatrixPerspectiveFovLH(
-        2.0f * std::atan(std::tan(DirectX::XMConvertToRadians(70) * 0.5f) / aspectRatio),
-        aspectRatio,
-        0.3f,
-        1000.0f);
-
-    DirectX::XMFLOAT4X4 f;
-    DirectX::XMStoreFloat4x4(&f, g_ProjectionMatrix);*/
-
-    //g_ProjectionMatrix = DirectX::XMMatrixIdentity();
+    g_ProjectionMatrix = DirectX::XMLoadFloat4x4(&projectionMatrix);
 }
 
 HRESULT CreateGrid()
 {
     CComPtr<ID3DBlob> vsc, psc;
-    HRESULT           hr = S_OK;
-
-    UINT shaderCompilerFlags = 0;
-#if (defined DEBUG || defined _DEBUG)
-    shaderCompilerFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-
-    CComPtr<ID3DBlob> errors;
-        
-    hr = D3DCompileFromFile(L"Data/Shaders/grid.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VSMain", "vs_5_0", shaderCompilerFlags, 0,
-                        &vsc, &errors.p);
+    
+    HRESULT hr = CompileShaders(L"Data/Shaders/grid.hlsl", &g_GridVertexShader, &g_GridPixelShader, &vsc, &psc);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed compile vertex shader. %s %s", GetHResultMessage(hr).c_str(), static_cast<char*>(errors->GetBufferPointer()));
-        return hr;
-    }
-
-    hr = g_Device->CreateVertexShader(vsc->GetBufferPointer(), vsc->GetBufferSize(), nullptr, &g_GridVertexShader);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create vertex shader. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    hr = D3DCompileFromFile(L"Data/Shaders/grid.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PSMain", "ps_5_0", shaderCompilerFlags, 0,
-                        &psc, &errors.p);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed compile pixel shader. %s %s", GetHResultMessage(hr).c_str(), static_cast<char*>(errors->GetBufferPointer()));
-        return hr;
-    }
-
-    hr = g_Device->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &g_GridPixelShader);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create pixel shader. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create grid shaders.");
         return hr;
     }
     
-    std::vector<DirectX::XMFLOAT3> vertices(g_GridWidth * g_GridLength * 8);
-    std::vector<uint32_t> indices(vertices.size());
+    std::vector<DirectX::XMFLOAT3> vertices(g_GridVertexCount);
+    std::vector<uint32_t>          indices(vertices.size());
 
-    int index = 0;
-    
-    // Load the vertex array and index array with data.
-    for(int j=-g_GridLength/2; j<((g_GridLength/2)-1); j++)
+    // warning ugly code ahead
+    int       index = 0;
+    const int halfGridLength = g_GridLength / 2;
+    const int halfGridWidth = g_GridWidth / 2;
+    for (int j = -halfGridLength; j < halfGridLength - 1; j++)
     {
-        for(int i=-g_GridWidth/2; i<(g_GridWidth/2-1); i++)
+        for (int i = -halfGridWidth; i < halfGridWidth - 1; i++)
         {
             // Line 1 - Upper left.
-            float positionX = (float)i;
-            float positionZ = (float)(j + 1);
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f, static_cast<float>(j + 1));
             indices[index] = index;
             index++;
 
             // Line 1 - Upper right.
-            positionX = (float)(i + 1);
-            positionZ = (float)(j + 1);
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j + 1));
             indices[index] = index;
             index++;
 
             // Line 2 - Upper right
-            positionX = (float)(i + 1);
-            positionZ = (float)(j + 1);
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j + 1));
             indices[index] = index;
             index++;
 
             // Line 2 - Bottom right.
-            positionX = (float)(i + 1);
-            positionZ = (float)j;
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
-            //vertices[index].color = color;
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j));
             indices[index] = index;
             index++;
 
             // Line 3 - Bottom right.
-            positionX = (float)(i + 1);
-            positionZ = (float)j;
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
-            //vertices[index].color = color;
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j));
             indices[index] = index;
             index++;
 
             // Line 3 - Bottom left.
-            positionX = (float)i;
-            positionZ = (float)j;
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
-            //vertices[index].color = color;
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f, static_cast<float>(j));
             indices[index] = index;
             index++;
 
             // Line 4 - Bottom left.
-            positionX = (float)i;
-            positionZ = (float)j;
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f,  static_cast<float>(j));
             indices[index] = index;
             index++;
 
             // Line 4 - Upper left.
-            positionX = (float)i;
-            positionZ = (float)(j + 1);
-
-            vertices[index] = DirectX::XMFLOAT3(positionX, 0.0f, positionZ);
+            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f, static_cast<float>(j + 1));
             indices[index] = index;
             index++;
         }
     }
-    
-    D3D11_BUFFER_DESC vertexBufferDesc{};
-    vertexBufferDesc.ByteWidth = vertices.size() * sizeof(DirectX::XMFLOAT3);
-    vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    
-    D3D11_SUBRESOURCE_DATA vertexData { vertices.data() };
 
-    hr = g_Device->CreateBuffer(&vertexBufferDesc, &vertexData, &g_GridVertexBuffer);
+    hr = CreateVertexBuffer(vertices, &g_GridVertexBuffer);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create vertex buffer. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create grid vertex buffer.");
         return hr;
     }
 
-    // Create index buffer
-    D3D11_BUFFER_DESC indexBufferDesc{};
-    indexBufferDesc.ByteWidth = indices.size() * sizeof(uint32_t);
-    indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-
-    D3D11_SUBRESOURCE_DATA indexData { indices.data() };
-
-    hr = g_Device->CreateBuffer(&indexBufferDesc, &indexData, &g_GridIndexBuffer);
+    hr = CreateIndexBuffer(indices, &g_GridIndexBuffer);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create index buffer. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create grid index buffer.");
         return hr;
     }
-    
-    D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] =
-    {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
-    };
 
-    hr = g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
-                                     vsc->GetBufferPointer(), vsc->GetBufferSize(), &g_GridVertexLayout);
+    hr = CreateVertexLayoutUsingReflection(vsc, &g_GridVertexLayout);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create vertex layout. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create grid vertex layout.");
         return hr;
     }
     
     return hr;
 }
 
-DirectX::XMFLOAT3 GetPolygonVertexColor(FbxMesh* mesh, int vertexId, int controlPointId)
+DirectX::XMFLOAT3 GetFbxMeshPolygonVertexColor(FbxMesh* mesh, int vertexId, int controlPointId)
 {
     const FbxGeometryElementVertexColor* colorElement = mesh->GetElementVertexColor();
     if (!colorElement)
-        return {1,1,1};
+        return {1, 1, 1};
 
     FbxColor color;
     switch (colorElement->GetMappingMode())
@@ -576,10 +746,7 @@ DirectX::XMFLOAT3 GetPolygonVertexColor(FbxMesh* mesh, int vertexId, int control
                     color = colorElement->GetDirectArray().GetAt(id);
                     break;
                 }
-            default:
-                {
-                    break;
-                }
+            default: { break; }
             }
             break;
         }
@@ -598,78 +765,74 @@ DirectX::XMFLOAT3 GetPolygonVertexColor(FbxMesh* mesh, int vertexId, int control
                     color = colorElement->GetDirectArray().GetAt(id);
                     break;
                 }
-            default:
-                {
-                    break;
-                }
+            default: { break; }
             }
             break;
         }
-    default:
-        {
-            break;
-        }
+    default: { break; }
     }
 
     return {
         static_cast<float>(color.mRed),
         static_cast<float>(color.mGreen),
-        static_cast<float>(color.mBlue)};
+        static_cast<float>(color.mBlue)
+    };
 }
 
-int g_indexCount;  
-HRESULT InitSample()
+HRESULT CreateModel()
 {
+    HRESULT hr = S_OK;
+    
     g_FbxManager = FbxSharedDestroyPtr<FbxManager>(FbxManager::Create());
     FbxSharedDestroyPtr<FbxIOSettings> fbxIOSettings(FbxIOSettings::Create(g_FbxManager, IOSROOT));
     FbxSharedDestroyPtr<FbxImporter>   fbxImporter(FbxImporter::Create(g_FbxManager, g_ModelFileName));
 
     if (!fbxImporter->Initialize(g_ModelFileName, -1, fbxIOSettings))
     {
-        DEBUG_LOG_FORMAT("Call to FbxImporter::Initialize() failed. %s \n", fbxImporter->GetStatus().GetErrorString());
+        DEBUG_LOG_FORMAT("Call to FbxImporter::Initialize() failed. %s", fbxImporter->GetStatus().GetErrorString());
         return E_FAIL;
     }
 
     FbxSharedDestroyPtr<FbxScene> fbxScene(FbxScene::Create(g_FbxManager, "SampleModelScene"));
     if (!fbxImporter->Import(fbxScene))
     {
-        DEBUG_LOG_FORMAT("Could not import scene. %s \n", fbxImporter->GetStatus().GetErrorString());
+        DEBUG_LOG_FORMAT("Could not import scene. %s", fbxImporter->GetStatus().GetErrorString());
         return E_FAIL;
     }
     fbxImporter.Destroy();
 
     if (fbxScene->GetNodeCount() == 0)
     {
-        DEBUG_LOG_FORMAT("No content is present in the fbx file. \n");
+        DEBUG_LOG_FORMAT("No content is present in the fbx file.");
         return E_FAIL;
     }
 
+    // Doesn't seem to work for me. I'm converting manually instead
     //FbxAxisSystem::DirectX.ConvertScene(fbxScene);
 
     // Triangulate the meshes
-    FbxGeometryConverter geometryConverter( g_FbxManager );
-    geometryConverter.Triangulate( fbxScene, true );
+    FbxGeometryConverter geometryConverter(g_FbxManager);
+    geometryConverter.Triangulate(fbxScene, true);
     geometryConverter.RemoveBadPolygonsFromMeshes(fbxScene);
     
-    const FbxSystemUnit& sysUnit = fbxScene->GetGlobalSettings().GetSystemUnit();
     const FbxSystemUnit& mUnit = FbxSystemUnit::m;
 
-    const FbxSystemUnit::ConversionOptions lConversionOptions = {
+    constexpr FbxSystemUnit::ConversionOptions conversionOptions = {
         false, /* mConvertRrsNodes */
         true, /* mConvertAllLimits */
         true, /* mConvertClusters */
         true, /* mConvertLightIntensity */
         true, /* mConvertPhotometricLProperties */
-        true  /* mConvertCameraClipPlanes */
-      };
-    
-    mUnit.ConvertScene(fbxScene, lConversionOptions);
-    
+        true /* mConvertCameraClipPlanes */
+    };
+
+    mUnit.ConvertScene(fbxScene, conversionOptions);
+
     FbxNode* meshNode = nullptr;
     FbxMesh* mesh = nullptr;
     for (int i = 0; i < fbxScene->GetNodeCount(); i++)
     {
-        FbxNode* n = fbxScene->GetNode(i);
+        FbxNode*          n = fbxScene->GetNode(i);
         FbxNodeAttribute* attr = n->GetNodeAttribute();
         if (!attr)
             continue;
@@ -686,254 +849,95 @@ HRESULT InitSample()
 
     if (!mesh)
     {
-        DEBUG_LOG_FORMAT("Could not find any meshes in fbx file. \n");
+        DEBUG_LOG_FORMAT("Could not find any meshes in fbx file.");
         return E_FAIL;
     }
-    
+
     std::vector<VertexData> vertices;
-    std::vector<int> indices;
-    
+    std::vector<uint32_t>   indices;
+
     FbxVector4* controlPoints = mesh->GetControlPoints();
-    int polyCount = mesh->GetPolygonCount();
-    
+    int         polyCount = mesh->GetPolygonCount();
+
     FbxMatrix fbxTransform = meshNode->EvaluateGlobalTransform();
     
-    //fbxTransform.SetRow(3, FbxVector4(0,0,0,1));
-    
     // Convert from right handed to left handed. Flip z axis, rotate by 180 to face the z axis
-    FbxMatrix m(FbxVector4(), FbxVector4(0,180,0), FbxVector4(1,1,-1));
+    FbxMatrix m(FbxVector4(), FbxVector4(0, 180, 0), FbxVector4(1, 1, -1));
     fbxTransform *= m;
 
     int vertexCounter = 0;
     for (int j = 0; j < polyCount; j++)
     {
         int iNumVertices = mesh->GetPolygonSize(j);
-        assert( iNumVertices == 3 );
+        assert(iNumVertices == 3);
 
         indices.push_back(j * 3);
         indices.push_back(j * 3 + 2);
         indices.push_back(j * 3 + 1);
-        
+
         for (int k = 0; k < iNumVertices; k++)
         {
             int iControlPointIndex = mesh->GetPolygonVertex(j, k);
 
-            // 0,1,2, 3,4,5, 6,7,8
-            // 0,2,1, 3,5,4, 6,8,7
-
-            /*if ((indicesIndex % 2) == 0)
-                indicesIndex+=1;*/
-            /*if (indicesIndex > 0 (indicesIndex % 3) == 0)
-                indicesIndex-=1;*/
-            
-            //indices.push_back(indicesIndex++);
-
             FbxVector4 pos = controlPoints[iControlPointIndex];
-            //pos.mData[3] = 1;
             pos = fbxTransform.MultNormalize(pos);
-            
-            //pos = fbxTransform.MultR(pos);
-            //pos = fbxTransform.MultS(pos);
-            
-            //pos *= 0.5f;
-            
             double* p = pos.mData;
-            
+
             VertexData vertex;
             vertex.m_Position =
-                {
+            {
                 static_cast<float>(p[0]),
                 static_cast<float>(p[1]),
                 static_cast<float>(p[2])
-                };
+            };
 
             FbxVector4 fbxNormal;
             mesh->GetPolygonVertexNormal(j, k, fbxNormal);
-            
-            //fbxNormal = fbxTransform.MultNormalize(fbxNormal);
+
+            // convert to normals to left handed
             fbxNormal = m.MultNormalize(fbxNormal);
-            
-            vertex.m_Color = GetPolygonVertexColor(mesh, vertexCounter, iControlPointIndex); // g_GeomVertexColor;
-            
-            vertex.m_Normal =  DirectX::XMFLOAT3(
+
+            vertex.m_Color = GetFbxMeshPolygonVertexColor(mesh, vertexCounter, iControlPointIndex);
+
+            vertex.m_Normal = DirectX::XMFLOAT3(
                 static_cast<float>(fbxNormal.mData[0]),
                 static_cast<float>(fbxNormal.mData[1]),
                 static_cast<float>(fbxNormal.mData[2]));
-            
+
             vertices.push_back(vertex);
 
             vertexCounter++;
         }
     }
 
-    /*indices =
-    {
-        0, 2, 1, = 0+0, 0+2, 0+1
-        3, 5, 4, = 3+0, 3+2, 3+1
-        
-        6, 8, 7, = 6+0, 6+2, 6+1
-        9, 11, 10,
+    g_ModelVertexCount = vertices.size();
 
-        12, 14, 13,
-        15, 17, 16,
-    };*/
-    
-    //indices.assign(mesh->GetPolygonVertices(), mesh->GetPolygonVertices() + mesh->GetPolygonVertexCount());
-    /*vertices =
-    {
-        {DirectX::XMFLOAT3(-1, -1, -1), g_GeomVertexColor, {-1, -1, -1}},
-        {DirectX::XMFLOAT3(-1, -1, 1), g_GeomVertexColor, {-1, -1, 1}},
-        {DirectX::XMFLOAT3(-1, 1, -1), g_GeomVertexColor, {-1, 1, -1}},
-
-        {DirectX::XMFLOAT3(-1, -1, 1), g_GeomVertexColor, {-1, -1, 1}},
-        {DirectX::XMFLOAT3(-1, 1, 1), g_GeomVertexColor, {-1, 1, 1}},
-        {DirectX::XMFLOAT3(-1, 1, -1), g_GeomVertexColor, {-1, 1, -1}},
-
-        {DirectX::XMFLOAT3(-1, -1, 1), g_GeomVertexColor, {-1, -1, 1}}, //6g
-        {DirectX::XMFLOAT3(1, 1, 1), g_GeomVertexColor, {1, 1, 1}}, //7
-        {DirectX::XMFLOAT3(1, -1, 1), g_GeomVertexColor, {1, -1, 1}}, //8
-
-        {DirectX::XMFLOAT3(1, 1, 1), g_GeomVertexColor, {1, 1, 1}},
-{DirectX::XMFLOAT3(-1, 1, 1), g_GeomVertexColor, {-1, 1, 1}},
-{DirectX::XMFLOAT3(-1, -1, 1), g_GeomVertexColor, {-1, -1, 1}},
-        
-    };*/
-    int vertexCount = vertices.size();
-    
-    /*int icount = mesh->GetPolygonVertexCount();
-    std::vector<int> test;
-    test.assign(mesh->GetPolygonVertices(), mesh->GetPolygonVertices() + icount);*/
-
-    //const uint32_t* indices = const_cast<uint32_t*>(g_GeomIndices);
-    int indexCount = indices.size();// ARRAYSIZE(g_GeomIndices); //mesh->GetPolygonVertexCount();
-    g_indexCount = indexCount;
-    
-    /*int vertexCount  = ARRAYSIZE(g_GeomVerts);
-    std::vector<VertexData> vertices(g_GeomVerts, std::end(g_GeomVerts));*/
-
-    //int indexCount = ARRAYSIZE(g_GeomIndices);
-    //constexpr const uint32_t* indices = const_cast<uint32_t*>(g_GeomIndices);
-    
-    // load and compile shaders
-    CComPtr<ID3DBlob> vsc, psc;
-    HRESULT           hr = S_OK;
-
-    CComPtr<ID3DBlob> errors;
-
-    UINT shaderCompilerFlags = 0;
-#if (defined DEBUG || defined _DEBUG)
-    shaderCompilerFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-
-    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VSMain", "vs_5_0", shaderCompilerFlags, 0,
-                            &vsc, &errors.p);
+    CComPtr<ID3DBlob> vsCode, psCode;
+    hr = CompileShaders(L"Data/Shaders/shader.hlsl", &g_ModelVertexShader, &g_ModelPixelShader, &vsCode, &psCode);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed compile vertex shader. %s %s", (GetHResultMessage(hr)).c_str(), static_cast<char*>(errors->GetBufferPointer()));
+        DEBUG_LOG_FORMAT("Failed to compile shaders for the model.");
         return hr;
     }
 
-    hr = D3DCompileFromFile(L"Data/Shaders/shader.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "PSMain", "ps_5_0", shaderCompilerFlags, 0,
-                            &psc, &errors.p);
+    hr = CreateVertexBuffer(vertices, &g_ModelVertexBuffer);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed compile pixel shader. %s %s", GetHResultMessage(hr).c_str(), static_cast<char*>(errors->GetBufferPointer()));
+        DEBUG_LOG_FORMAT("Failed to create model vertex buffer. ");
         return hr;
     }
 
-    hr = g_Device->CreateVertexShader(vsc->GetBufferPointer(), vsc->GetBufferSize(), nullptr, &g_VS);
+    hr = CreateIndexBuffer(indices, &g_ModelIndexBuffer);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create vertex shader. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create model index buffer. ");
         return hr;
     }
 
-    hr = g_Device->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &g_PS);
+    hr = CreateVertexLayoutUsingReflection(vsCode, &g_ModelVertexLayout);
     if (FAILED(hr))
     {
-        DEBUG_LOG_FORMAT("Failed to create pixel shader. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    CD3D11_BUFFER_DESC perFrameBufferDesc = {};
-    perFrameBufferDesc.ByteWidth = sizeof(FrameConstantBufferData);
-    perFrameBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-
-    hr = g_Device->CreateBuffer(&perFrameBufferDesc, nullptr, &g_PerFrameConstantBuffer);
-
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create per frame constant buffer. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    // Create geom vertex buffer
-    D3D11_BUFFER_DESC bd = {};
-    bd.Usage = D3D11_USAGE_DYNAMIC; // write access access by CPU and GPU
-    bd.ByteWidth = vertexCount * sizeof(VertexData);
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; // use as a vertex buffer
-    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; // allow CPU to write in buffer
-
-    hr = g_Device->CreateBuffer(&bd, nullptr, &g_SampleGeometryVertexBuffer);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create vertex buffer. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    // store verts in the vertex buffer
-    D3D11_MAPPED_SUBRESOURCE vertexBufferSubresource;
-    hr = g_DeviceContext->Map(g_SampleGeometryVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, NULL, &vertexBufferSubresource);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to map vertex buffer. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    //std::memcpy(vertexBufferSubresource.pData, vertices.data(), vertexCount * sizeof(VertexData));
-    memcpy(vertexBufferSubresource.pData, vertices.data(), vertexCount * sizeof(VertexData)); // copy the data
-    g_DeviceContext->Unmap(g_SampleGeometryVertexBuffer, NULL); // unmap           
-
-
-    // Create index buffer
-    D3D11_BUFFER_DESC ibd = {};
-    ibd.Usage = D3D11_USAGE_DYNAMIC; // write access access by CPU and GPU
-    ibd.ByteWidth = indexCount * sizeof(uint32_t);
-    ibd.BindFlags = D3D11_BIND_INDEX_BUFFER; // use as a vertex buffer
-    ibd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; // allow CPU to write in buffer
-
-    hr = g_Device->CreateBuffer(&ibd, nullptr, &g_SampleGeometryIndexBuffer);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create index buffer. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    // store indices in the buffer
-    D3D11_MAPPED_SUBRESOURCE indicesRes;
-    hr = g_DeviceContext->Map(g_SampleGeometryIndexBuffer, 0, D3D11_MAP_WRITE_DISCARD, NULL, &indicesRes);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to map index buffer. %s", GetHResultMessage(hr).c_str());
-        return hr;
-    }
-
-    memcpy(indicesRes.pData, indices.data(), indexCount * sizeof(uint32_t)); // copy the data
-    g_DeviceContext->Unmap(g_SampleGeometryIndexBuffer, NULL); // unmap           
-
-    // Create vertex layout. This is somewhat unrelated to geometry
-    D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] =
-    {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
-    };
-
-    hr = g_Device->CreateInputLayout(vertexLayoutDesc, ARRAYSIZE(vertexLayoutDesc),
-                                     vsc->GetBufferPointer(), vsc->GetBufferSize(), &g_VertexLayout);
-    if (FAILED(hr))
-    {
-        DEBUG_LOG_FORMAT("Failed to create vertex layout. %s", GetHResultMessage(hr).c_str());
+        DEBUG_LOG_FORMAT("Failed to create model vertex layout. ");
         return hr;
     }
 
@@ -942,106 +946,93 @@ HRESULT InitSample()
 
 void ProcessFrame()
 {
-    static auto timePrevFrame = std::chrono::high_resolution_clock::now();
+    // Uncomment in case we need delta time
+    /*static auto timePrevFrame = std::chrono::high_resolution_clock::now();
     const auto  timeThisFrame = std::chrono::high_resolution_clock::now();
     const float deltaTime = std::chrono::duration<float>(timeThisFrame - timePrevFrame).count();
-    timePrevFrame = timeThisFrame;
-
-    static float           spinAngle = 0;
-    static constexpr float spinSpeed = 10.0f;
-    spinAngle += deltaTime * spinSpeed;
-    if (spinAngle > 360.0f) { spinAngle = 0; }
-
-    //spinAngle = 0;
-    // Rotate model to face the camera
-    DirectX::XMMATRIX modelMatrix = DirectX::XMMatrixRotationY(DirectX::XMConvertToRadians(180 /*+ spinAngle*/));
-    //modelMatrix *= DirectX::XMMatrixTranslation(0,0,7);
-    
-    
-    //g_ProjectionMatrix = DirectX::XMMatrixIdentity();
-    //viewMatrix = DirectX::XMMatrixIdentity();
-    DirectX::XMMATRIX viewMatrix = DirectX::XMMatrixIdentity();
-    //viewMatrix *= DirectX::XMMatrixTranslation(0, 0, -3.5);
-    //viewMatrix = DirectX::XMMatrixInverse(nullptr, viewMatrix);
-    
-    auto camRotationMatrix = DirectX::XMMatrixRotationRollPitchYaw(
-        DirectX::XMConvertToRadians(g_CameraPitch), DirectX::XMConvertToRadians(g_CameraYaw), 0);
-
-   // DirectX::XMVECTOR camPanVector = DirectX::XMVector3Transform(DirectX::XMVectorSet(g_CameraPos.x, 0,0,0), camRotationMatrix);
-
-    viewMatrix = DirectX::XMMatrixTranslation(0,0,g_CameraZoom) * camRotationMatrix * DirectX::XMMatrixTranslationFromVector(g_CameraPos);
-    
-    DirectX::XMVECTOR vWorldSpaceCameraPos = DirectX::XMVector4Transform(DirectX::XMVectorSet(0,0,0,1), viewMatrix);
-    
-    viewMatrix = DirectX::XMMatrixInverse(nullptr, viewMatrix);
-
-    /*DirectX::XMFLOAT4X4 f;
-    DirectX::XMStoreFloat4x4(&f, viewMatrix);*/
-
-    DirectX::XMVECTOR viewDir = DirectX::XMVector4Normalize(DirectX::XMVectorNegate(vWorldSpaceCameraPos));
-    DirectX::XMStoreFloat3(&g_DirectionalLightData.m_Direction, viewDir);
-    
-    FrameConstantBufferData perFrameBuffer = {};
-    perFrameBuffer.m_ModelMatrix = XMMatrixTranspose(modelMatrix);
-    perFrameBuffer.m_ViewMatrix = XMMatrixTranspose(viewMatrix);
-    perFrameBuffer.m_MvpMatrix = XMMatrixTranspose(modelMatrix * viewMatrix * g_ProjectionMatrix);
-    perFrameBuffer.m_DirectionalLightData = g_DirectionalLightData;
-    perFrameBuffer.m_FogColor = g_FogColor;
-    perFrameBuffer.m_FogRange = g_FogRange;
-    
-    XMStoreFloat4(&perFrameBuffer.m_WorldSpaceCameraPos, vWorldSpaceCameraPos);  
+    timePrevFrame = timeThisFrame;*/
 
     ID3D11DeviceContext* ctx = g_DeviceContext;
+    
+    // Rotate model to face the camera
+    const DirectX::XMMATRIX worldMatrix = DirectX::XMMatrixRotationY(DirectX::XMConvertToRadians(180));
+    
+    const DirectX::XMMATRIX cameraRotationMatrix =
+        DirectX::XMMatrixRotationRollPitchYaw(
+            DirectX::XMConvertToRadians(g_CameraPitch),
+            DirectX::XMConvertToRadians(g_CameraYaw),
+             0);
+    
+    DirectX::XMMATRIX cameraMatrix = DirectX::XMMatrixTranslation(0, 0, g_CameraZoomZ) * cameraRotationMatrix *
+        DirectX::XMMatrixTranslationFromVector(g_CameraPos);
 
-    ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &perFrameBuffer, 0, 0);
+    DirectX::XMVECTOR worldSpaceCameraPos = DirectX::XMVector4Transform(DirectX::XMVectorSet(0, 0, 0, 1), cameraMatrix);
 
+    cameraMatrix = DirectX::XMMatrixInverse(nullptr, cameraMatrix);
+
+    DirectX::XMVECTOR cameraDir = DirectX::XMVector4Normalize(DirectX::XMVectorNegate(worldSpaceCameraPos));
+    DirectX::XMStoreFloat3(&g_DirectionalLightData.m_Direction, cameraDir);
+
+    FrameConstantBufferData frameCbd = {};
+    frameCbd.m_ModelMatrix = XMMatrixTranspose(worldMatrix);
+    frameCbd.m_ViewMatrix = XMMatrixTranspose(cameraMatrix);
+    frameCbd.m_MvpMatrix = XMMatrixTranspose(worldMatrix * cameraMatrix * g_ProjectionMatrix);
+    frameCbd.m_DirectionalLightData = g_DirectionalLightData;
+    frameCbd.m_FogColor = g_FogColor;
+    frameCbd.m_FogRange = g_FogRange;
+    XMStoreFloat4(&frameCbd.m_WorldSpaceCameraPos, worldSpaceCameraPos);
+
+    ctx->UpdateSubresource(g_FrameConstantBuffer, 0, nullptr, &frameCbd, 0, 0);
+    
     ctx->OMSetRenderTargets(1, &g_BackBufferView.p, g_DepthStencilView);
 
     //ctx->OMSetDepthStencilState(g_DepthStencilState, 1);
+    
     //ctx->RSSetState(g_RasterizerState);
-    
+
     ctx->ClearRenderTargetView(g_BackBufferView, reinterpret_cast<FLOAT*>(&g_ClearColor));
-
+    
     ctx->ClearDepthStencilView(g_DepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
-    
-    constexpr UINT vertexBufferStride = sizeof(VertexData);
-    constexpr UINT vertexBufferOffset = 0;
-    ctx->IASetVertexBuffers(0, 1, &g_SampleGeometryVertexBuffer.p, &vertexBufferStride, &vertexBufferOffset);
 
-    ctx->VSSetShader(g_VS, nullptr, 0);
+    // Render model
+    constexpr UINT modelBufferStride = sizeof(VertexData);
+    constexpr UINT modelBufferOffset = 0;
+    ctx->IASetVertexBuffers(0, 1, &g_ModelVertexBuffer.p, &modelBufferStride, &modelBufferOffset);
 
-    ctx->VSSetConstantBuffers(0, 1, &g_PerFrameConstantBuffer.p);
-    ctx->PSSetConstantBuffers(0, 1, &g_PerFrameConstantBuffer.p);
-    
-    ctx->PSSetShader(g_PS, nullptr, 0);
-    ctx->IASetIndexBuffer(g_SampleGeometryIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+    ctx->VSSetShader(g_ModelVertexShader, nullptr, 0);
+
+    ctx->VSSetConstantBuffers(0, 1, &g_FrameConstantBuffer.p);
+    ctx->PSSetConstantBuffers(0, 1, &g_FrameConstantBuffer.p);
+
+    ctx->PSSetShader(g_ModelPixelShader, nullptr, 0);
+    ctx->IASetIndexBuffer(g_ModelIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    ctx->IASetInputLayout(g_VertexLayout);
-    ctx->DrawIndexed(g_indexCount, 0, 0);
+    ctx->IASetInputLayout(g_ModelVertexLayout);
+    ctx->DrawIndexed(g_ModelVertexCount, 0, 0);
 
-    // draw grid
+    // Render grid
+    frameCbd.m_ModelMatrix = DirectX::XMMatrixIdentity();
+    frameCbd.m_MvpMatrix = XMMatrixTranspose(cameraMatrix * g_ProjectionMatrix);
 
-    perFrameBuffer.m_ModelMatrix = DirectX::XMMatrixIdentity();
-    perFrameBuffer.m_MvpMatrix = XMMatrixTranspose(viewMatrix * g_ProjectionMatrix);
-
-    ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &perFrameBuffer, 0, 0);
-    
+    ctx->UpdateSubresource(g_FrameConstantBuffer, 0, nullptr, &frameCbd, 0, 0);
     
     constexpr UINT gridBufferStride = sizeof(DirectX::XMFLOAT3);
     constexpr UINT gridBufferOffset = 0;
-
     ctx->IASetVertexBuffers(0, 1, &g_GridVertexBuffer.p, &gridBufferStride, &gridBufferOffset);
-    ctx->IASetIndexBuffer(g_GridIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
     
+    ctx->IASetIndexBuffer(g_GridIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+
     ctx->VSSetShader(g_GridVertexShader, nullptr, 0);
+    
     ctx->PSSetShader(g_GridPixelShader, nullptr, 0);
 
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
 
     ctx->IASetInputLayout(g_GridVertexLayout);
-    
+
     ctx->DrawIndexed(g_GridWidth * g_GridLength * 8, 0, 0);
-    
+
+    // present the frame
     g_SwapChain->Present(0, 0);
 }
 
@@ -1051,9 +1042,6 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
     case WM_SIZE:
         {
-            //const UINT width = LOWORD(lParam);
-            //const UINT height = HIWORD(lParam);
-        
             g_DeviceContext->OMSetRenderTargets(0, nullptr, nullptr);
             g_DeviceContext->Flush();
 
@@ -1063,18 +1051,18 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             g_SwapChain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
             HRESULT hr = SetUpBackBuffer();
 
-            CalculateProjectionMatrix();
-
             if (FAILED(hr))
             {
-                DEBUG_LOG_FORMAT("Failed to set up back buffer during resize event. %s", GetHResultMessage(hr).c_str());
+                DEBUG_LOG_FORMAT("Failed to recreate back buffer during resize event. %s", GetErrorMessage(hr).c_str());
+                PostQuitMessage(hr);
+                return 0;
             }
-            else
-            {
-                SetUpViewport();
-            }
+
+            SetUpViewport();
+            CalculateProjectionMatrix();
         }
         break;
+        
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
@@ -1083,34 +1071,18 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             float delta = GET_WHEEL_DELTA_WPARAM(wParam);
 
-            float zoomDeltaFactor = Clamp( delta * (1.0f / g_CameraZoomMaxScrollDelta), -1.0f,1.0f);
-            DEBUG_LOG_FORMAT("%d \n", zoomDeltaFactor);
-
-            g_CameraZoom += zoomDeltaFactor * g_CameraZoomMaxSpeed;
-            g_CameraZoom = std::min(0.0f, g_CameraZoom);
-            
-            /*DirectX::XMMATRIX rotMatrix =
-                DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(1,0,0,0), DirectX::XMConvertToRadians(g_CameraPitch)) *
-                    DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0,1,0,0), DirectX::XMConvertToRadians(g_CameraYaw));
-
-            DirectX::XMVECTOR zoomDelta = DirectX::XMVectorSet(0,0,zoomDeltaFactor * g_CameraZoomMaxSpeed,0);
-            zoomDelta = DirectX::XMVector3Transform(zoomDelta, rotMatrix);
-           // g_CameraPos = DirectX::XMVectorAdd(g_CameraPos, zoomDelta);
-            
-            DirectX::XMFLOAT3 camPos;
-            DirectX::XMStoreFloat3(&camPos, g_CameraPos);
-            camPos.z = std::min(0.0f, camPos.z);*/
-            //g_CameraPos = DirectX::XMLoadFloat3(&camPos);
+            float zoomDeltaFactor = Clamp(delta * (1.0f / g_CameraZoomMaxScrollDelta), -1.0f, 1.0f);
+            g_CameraZoomZ += zoomDeltaFactor * g_CameraZoomMaxSpeed;
+            g_CameraZoomZ = std::min(0.0f, g_CameraZoomZ);
         }
         break;
-
-
+    
     case WM_LBUTTONDOWN:
         {
-            if (/*GetKeyState(VK_MENU) & 0x8000 && */!g_CameraOrbitEnabled)
+            if (!g_CameraOrbitEnabled)
             {
                 SetCapture(hWnd);
-                g_CameraOrbitEnabled = true;   
+                g_CameraOrbitEnabled = true;
             }
         }
         break;
@@ -1119,7 +1091,7 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (g_CameraOrbitEnabled)
             {
                 ReleaseCapture();
-                g_CameraOrbitEnabled = false;   
+                g_CameraOrbitEnabled = false;
             }
         }
         break;
@@ -1128,7 +1100,7 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (!g_CameraPanEnabled)
             {
                 SetCapture(hWnd);
-                g_CameraPanEnabled = true;   
+                g_CameraPanEnabled = true;
             }
         }
         break;
@@ -1137,23 +1109,23 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (g_CameraPanEnabled)
             {
                 ReleaseCapture();
-                g_CameraPanEnabled = false; 
+                g_CameraPanEnabled = false;
             }
         }
         break;
-        
+
     case WM_MOUSEMOVE:
         {
-            float px = static_cast<float>(GET_X_LPARAM(lParam));
-            float py = static_cast<float>(GET_Y_LPARAM(lParam));
+            auto px = static_cast<float>(GET_X_LPARAM(lParam));
+            auto py = static_cast<float>(GET_Y_LPARAM(lParam));
 
             float mouseDeltaX = px - g_MousePosLastMoveEvent.x;
             float mouseDeltaY = py - g_MousePosLastMoveEvent.y;
-            
+
             if (g_CameraOrbitEnabled)
             {
-                float orbitDeltaFactorX = Clamp( mouseDeltaX * (1/g_CameraOrbitMaxMouseDelta), -1.0f, 1.0f);
-                float orbitDeltaFactorY = Clamp( mouseDeltaY * (1/g_CameraOrbitMaxMouseDelta), -1.0f, 1.0f);
+                float orbitDeltaFactorX = Clamp(mouseDeltaX * (1 / g_CameraOrbitMaxMouseDelta), -1.0f, 1.0f);
+                float orbitDeltaFactorY = Clamp(mouseDeltaY * (1 / g_CameraOrbitMaxMouseDelta), -1.0f, 1.0f);
 
                 g_CameraYaw += orbitDeltaFactorX * g_CameraOrbitMaxSpeed;
                 g_CameraPitch += orbitDeltaFactorY * g_CameraOrbitMaxSpeed;
@@ -1161,22 +1133,23 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if (g_CameraPanEnabled)
             {
-                float deltaFactorX = Clamp( mouseDeltaX * (1/g_CameraPanMaxMouseDelta), -1.0f, 1.0f);
-                float deltaFactorY = Clamp( mouseDeltaY * (1/g_CameraPanMaxMouseDelta), -1.0f, 1.0f);
-
-                DirectX::XMMATRIX rotMatrix =
-                    DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(1,0,0,0), DirectX::XMConvertToRadians(g_CameraPitch)) *
-                        DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0,1,0,0), DirectX::XMConvertToRadians(g_CameraYaw));
+                float deltaFactorX = Clamp(mouseDeltaX * (1 / g_CameraPanMaxMouseDelta), -1.0f, 1.0f);
+                float deltaFactorY = Clamp(mouseDeltaY * (1 / g_CameraPanMaxMouseDelta), -1.0f, 1.0f);
                 
-                //g_CameraPos.x -= deltaFactorX * g_CameraPanMaxSpeed;
-                //g_CameraPos.y += deltaFactorY * g_CameraPanMaxSpeed;
+                const DirectX::XMMATRIX cameraRotationMatrix =
+                    DirectX::XMMatrixRotationRollPitchYaw(
+                        DirectX::XMConvertToRadians(g_CameraPitch),
+                        DirectX::XMConvertToRadians(g_CameraYaw),
+                         0);
 
-                DirectX::XMVECTOR panVector = DirectX::XMVector3Transform(DirectX::XMVectorSet(deltaFactorX, deltaFactorY, 0,0), rotMatrix);
+                DirectX::XMVECTOR panVector = DirectX::XMVector3Transform(
+                    DirectX::XMVectorSet(deltaFactorX, deltaFactorY, 0, 0), cameraRotationMatrix);
+                
                 g_CameraPos = DirectX::XMVectorAdd(g_CameraPos, panVector);
             }
 
-            g_MousePosLastMoveEvent.x = px; 
-            g_MousePosLastMoveEvent.y = py;  
+            g_MousePosLastMoveEvent.x = px;
+            g_MousePosLastMoveEvent.y = py;
         }
         break;
     default:
@@ -1186,8 +1159,10 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
-void CreateSampleWindow(HINSTANCE hInstance)
+HRESULT CreateMainWindow(HINSTANCE hInstance)
 {
+    HRESULT hr = S_OK;
+    
     WNDCLASSEXW wcx = {};
     wcx.cbSize = sizeof(WNDCLASSEX);
     wcx.style = CS_HREDRAW | CS_VREDRAW;
@@ -1195,17 +1170,21 @@ void CreateSampleWindow(HINSTANCE hInstance)
     wcx.hInstance = hInstance;
     wcx.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcx.hbrBackground = CreateSolidBrush(RGB(0, 0, 0));
-    wcx.lpszClassName = g_SampleWindowClassName;
+    wcx.lpszClassName = g_WindowClassName;
 
-    RegisterClassExW(&wcx);
-
-    RECT rc = {0, 0, g_SampleWindowWidth, g_SampleWindowHeight};
+    if (!RegisterClassExW(&wcx))
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        DEBUG_LOG_FORMAT("Failed register main window class. %s", GetErrorMessage(hr).c_str());
+    }
+    
+    RECT rc = {0, 0, g_WindowWidth, g_WindowHeight};
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, false);
 
-    g_SampleWindow = CreateWindowEx(
+    g_Window = CreateWindowEx(
         0,
-        g_SampleWindowClassName,
-        g_SampleWindowName,
+        g_WindowClassName,
+        g_WindowName,
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -1215,59 +1194,13 @@ void CreateSampleWindow(HINSTANCE hInstance)
         nullptr,
         hInstance,
         nullptr);
-}
 
-int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
-                      _In_opt_ HINSTANCE hPrevInstance,
-                      _In_ LPWSTR        lpCmdLine,
-                      _In_ int           nShowCmd)
-{
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
-
-    HRESULT hr = CreateDevice();
-    if (FAILED(hr))
-        return hr;
-
-    hr = CreateGrid();
-    if (FAILED(hr))
-        return hr;
-    
-    hr = InitSample();
-    if (FAILED(hr))
-        return hr;
-
-    CreateSampleWindow(hInstance);
-
-    if (!g_SampleWindow)
-        return 0;
-
-    hr = CreateSwapChain();
-    if (FAILED(hr))
-        return hr;
-
-    ShowWindow(g_SampleWindow, nShowCmd);
-    UpdateWindow(g_SampleWindow);
-
-    MSG msg;
-    // Main message loop:
-    while (true)
+    if (!g_Window)
     {
-        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-
-            if (msg.message == WM_QUIT)
-                break;
-        }
-        else
-        {
-            ProcessFrame();
-        }
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        DEBUG_LOG_FORMAT("Failed to create main window. %s", GetErrorMessage(hr).c_str());
+        return hr;
     }
 
-    g_SwapChain->SetFullscreenState(false, nullptr);
-
-    return static_cast<int>(msg.wParam);
+    return hr;
 }
