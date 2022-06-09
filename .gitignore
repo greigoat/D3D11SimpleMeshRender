@@ -47,3 +47,5 @@
 *.FileListAbsolute.txt
 
 *.exp
+*.iobj
+*.ipdb

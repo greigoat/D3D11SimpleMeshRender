@@ -12,6 +12,7 @@
 // ReSharper disable once IdentifierTypo
 #define NOMINMAX
 #include <Windows.h>
+#include <windowsx.h>
 
 #include <atlbase.h>
 
@@ -55,8 +56,10 @@ struct FrameConstantBufferData
     DirectX::XMMATRIX    m_ModelMatrix;
     DirectX::XMMATRIX    m_ViewMatrix;
     DirectX::XMMATRIX    m_MvpMatrix;
-    DirectX::XMFLOAT4 m_WorldSpaceCameraPos; 
+    DirectX::XMFLOAT4 m_WorldSpaceCameraPos;
     DirectionalLightData m_DirectionalLightData;
+    DirectX::XMFLOAT4 m_FogColor;
+    DirectX::XMFLOAT2 m_FogRange;
 };
 
 // Typedefs
@@ -66,8 +69,8 @@ struct FrameConstantBufferData
 HWND          g_SampleWindow;
 const TCHAR*  g_SampleWindowName = L"D3D11SimpleMeshRender";
 const TCHAR*  g_SampleWindowClassName = L"D3D11SimpleMeshRenderClass";
-constexpr int g_SampleWindowWidth = 759;//1024;
-constexpr int g_SampleWindowHeight = 291;//768;
+constexpr int g_SampleWindowWidth = 1024; // 759;
+constexpr int g_SampleWindowHeight = 768; // 291;
 
 CComPtr<IDXGISwapChain>          g_SwapChain;
 CComPtr<ID3D11Device>            g_Device;
@@ -89,7 +92,6 @@ CComPtr<ID3D11Buffer> g_GridIndexBuffer;
 CComPtr<ID3D11VertexShader> g_GridVertexShader;
 CComPtr<ID3D11PixelShader> g_GridPixelShader;
 CComPtr<ID3D11InputLayout>  g_GridVertexLayout;
-//CComPtr<ID3D11PixelShader> g_GridPixelShader;
 
 CComPtr<ID3D11VertexShader> g_VS;
 CComPtr<ID3D11PixelShader>  g_PS;
@@ -108,18 +110,24 @@ DirectionalLightData g_DirectionalLightData
     0.8f // attenuation
 };
 
-// Create cube geometry.
-constexpr VertexData g_GeomVerts[] =
-{
-    {DirectX::XMFLOAT3(-1, 0, 0), g_GeomVertexColor, {0, 1, 0}},
-    {DirectX::XMFLOAT3( 0, 1, 0), g_GeomVertexColor, {0, 1, 0}},
-    {DirectX::XMFLOAT3(1, 0, 0), g_GeomVertexColor, {0, 1, 0}},
-};
+DirectX::XMFLOAT4 g_FogColor = { 0.5f,0.5f,0.5f, 1 };
+DirectX::XMFLOAT2 g_FogRange = { 10.0f, 25.0f };
 
-constexpr uint32_t g_GeomIndices[] =
-{
-    0, 1, 2, 0, 2, 3
-};
+POINTF g_MousePosLastMoveEvent;
+
+DirectX::XMVECTOR g_CameraPos = DirectX::XMVectorSet(0,0,0,0);
+float g_CameraZoom = -2.5f;
+//DirectX::XMVECTOR g_CameraPosZoom = DirectX::XMVectorSet(0,0,0,0);
+float g_CameraPitch = 20.0f;
+float g_CameraYaw = 0.0f;
+float g_CameraZoomMaxSpeed = 0.25f;
+float g_CameraZoomMaxScrollDelta = 120;
+bool g_CameraOrbitEnabled = false;
+float g_CameraOrbitMaxMouseDelta = 10;
+float g_CameraOrbitMaxSpeed = 5.0f;
+bool g_CameraPanEnabled = false;
+float g_CameraPanMaxMouseDelta = 200.0f;
+float g_CameraPanMaxSpeed = 2.0f;
 
 void DebugLogFormat(const char* format, ...)
 {
@@ -132,6 +140,12 @@ void DebugLogFormat(const char* format, ...)
     OutputDebugStringA(szBuffer);
 
     va_end(args);
+}
+
+template<typename T>
+T Clamp(T val, T min, T max)
+{
+    return std::min( std::max(val, min), max);
 }
 
 std::string GetHResultMessage(HRESULT hr) { return std::system_category().message(hr); }
@@ -926,7 +940,7 @@ HRESULT InitSample()
     return hr;
 }
 
-void TickSample()
+void ProcessFrame()
 {
     static auto timePrevFrame = std::chrono::high_resolution_clock::now();
     const auto  timeThisFrame = std::chrono::high_resolution_clock::now();
@@ -949,17 +963,17 @@ void TickSample()
     DirectX::XMMATRIX viewMatrix = DirectX::XMMatrixIdentity();
     //viewMatrix *= DirectX::XMMatrixTranslation(0, 0, -3.5);
     //viewMatrix = DirectX::XMMatrixInverse(nullptr, viewMatrix);
+    
+    auto camRotationMatrix = DirectX::XMMatrixRotationRollPitchYaw(
+        DirectX::XMConvertToRadians(g_CameraPitch), DirectX::XMConvertToRadians(g_CameraYaw), 0);
 
-    viewMatrix =
-        DirectX::XMMatrixTranslation(0,0,-2.5f) *
-            DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(1,0,0,0), DirectX::XMConvertToRadians(20)) *
-            DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0,1,0,0), DirectX::XMConvertToRadians(spinAngle));
+   // DirectX::XMVECTOR camPanVector = DirectX::XMVector3Transform(DirectX::XMVectorSet(g_CameraPos.x, 0,0,0), camRotationMatrix);
 
-
+    viewMatrix = DirectX::XMMatrixTranslation(0,0,g_CameraZoom) * camRotationMatrix * DirectX::XMMatrixTranslationFromVector(g_CameraPos);
+    
     DirectX::XMVECTOR vWorldSpaceCameraPos = DirectX::XMVector4Transform(DirectX::XMVectorSet(0,0,0,1), viewMatrix);
     
     viewMatrix = DirectX::XMMatrixInverse(nullptr, viewMatrix);
-    //viewMatrix = DirectX::XMMatrixLookAtLH(DirectX::XMVectorSet(0,0,-3.5f,0), DirectX::XMVectorSet(0,0,0, 0), DirectX::XMVectorSet(0,1,0,0));
 
     /*DirectX::XMFLOAT4X4 f;
     DirectX::XMStoreFloat4x4(&f, viewMatrix);*/
@@ -967,16 +981,19 @@ void TickSample()
     DirectX::XMVECTOR viewDir = DirectX::XMVector4Normalize(DirectX::XMVectorNegate(vWorldSpaceCameraPos));
     DirectX::XMStoreFloat3(&g_DirectionalLightData.m_Direction, viewDir);
     
-    FrameConstantBufferData cb0 = {};
-    cb0.m_ModelMatrix = XMMatrixTranspose(modelMatrix);
-    cb0.m_ViewMatrix = XMMatrixTranspose(viewMatrix);
-    cb0.m_MvpMatrix = XMMatrixTranspose(modelMatrix * viewMatrix * g_ProjectionMatrix);
-    cb0.m_DirectionalLightData = g_DirectionalLightData,
-    XMStoreFloat4(&cb0.m_WorldSpaceCameraPos, vWorldSpaceCameraPos);  
+    FrameConstantBufferData perFrameBuffer = {};
+    perFrameBuffer.m_ModelMatrix = XMMatrixTranspose(modelMatrix);
+    perFrameBuffer.m_ViewMatrix = XMMatrixTranspose(viewMatrix);
+    perFrameBuffer.m_MvpMatrix = XMMatrixTranspose(modelMatrix * viewMatrix * g_ProjectionMatrix);
+    perFrameBuffer.m_DirectionalLightData = g_DirectionalLightData;
+    perFrameBuffer.m_FogColor = g_FogColor;
+    perFrameBuffer.m_FogRange = g_FogRange;
+    
+    XMStoreFloat4(&perFrameBuffer.m_WorldSpaceCameraPos, vWorldSpaceCameraPos);  
 
     ID3D11DeviceContext* ctx = g_DeviceContext;
 
-    ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &cb0, 0, 0);
+    ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &perFrameBuffer, 0, 0);
 
     ctx->OMSetRenderTargets(1, &g_BackBufferView.p, g_DepthStencilView);
 
@@ -1004,10 +1021,10 @@ void TickSample()
 
     // draw grid
 
-    cb0.m_ModelMatrix = DirectX::XMMatrixIdentity();
-    cb0.m_MvpMatrix = XMMatrixTranspose(viewMatrix * g_ProjectionMatrix);
+    perFrameBuffer.m_ModelMatrix = DirectX::XMMatrixIdentity();
+    perFrameBuffer.m_MvpMatrix = XMMatrixTranspose(viewMatrix * g_ProjectionMatrix);
 
-    ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &cb0, 0, 0);
+    ctx->UpdateSubresource(g_PerFrameConstantBuffer, 0, nullptr, &perFrameBuffer, 0, 0);
     
     
     constexpr UINT gridBufferStride = sizeof(DirectX::XMFLOAT3);
@@ -1036,7 +1053,7 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             //const UINT width = LOWORD(lParam);
             //const UINT height = HIWORD(lParam);
-
+        
             g_DeviceContext->OMSetRenderTargets(0, nullptr, nullptr);
             g_DeviceContext->Flush();
 
@@ -1052,11 +1069,115 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
                 DEBUG_LOG_FORMAT("Failed to set up back buffer during resize event. %s", GetHResultMessage(hr).c_str());
             }
-            else { SetUpViewport(); }
+            else
+            {
+                SetUpViewport();
+            }
         }
         break;
     case WM_DESTROY:
         PostQuitMessage(0);
+        break;
+
+    case WM_MOUSEWHEEL:
+        {
+            float delta = GET_WHEEL_DELTA_WPARAM(wParam);
+
+            float zoomDeltaFactor = Clamp( delta * (1.0f / g_CameraZoomMaxScrollDelta), -1.0f,1.0f);
+            DEBUG_LOG_FORMAT("%d \n", zoomDeltaFactor);
+
+            g_CameraZoom += zoomDeltaFactor * g_CameraZoomMaxSpeed;
+            g_CameraZoom = std::min(0.0f, g_CameraZoom);
+            
+            /*DirectX::XMMATRIX rotMatrix =
+                DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(1,0,0,0), DirectX::XMConvertToRadians(g_CameraPitch)) *
+                    DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0,1,0,0), DirectX::XMConvertToRadians(g_CameraYaw));
+
+            DirectX::XMVECTOR zoomDelta = DirectX::XMVectorSet(0,0,zoomDeltaFactor * g_CameraZoomMaxSpeed,0);
+            zoomDelta = DirectX::XMVector3Transform(zoomDelta, rotMatrix);
+           // g_CameraPos = DirectX::XMVectorAdd(g_CameraPos, zoomDelta);
+            
+            DirectX::XMFLOAT3 camPos;
+            DirectX::XMStoreFloat3(&camPos, g_CameraPos);
+            camPos.z = std::min(0.0f, camPos.z);*/
+            //g_CameraPos = DirectX::XMLoadFloat3(&camPos);
+        }
+        break;
+
+
+    case WM_LBUTTONDOWN:
+        {
+            if (/*GetKeyState(VK_MENU) & 0x8000 && */!g_CameraOrbitEnabled)
+            {
+                SetCapture(hWnd);
+                g_CameraOrbitEnabled = true;   
+            }
+        }
+        break;
+    case WM_LBUTTONUP:
+        {
+            if (g_CameraOrbitEnabled)
+            {
+                ReleaseCapture();
+                g_CameraOrbitEnabled = false;   
+            }
+        }
+        break;
+    case WM_RBUTTONDOWN:
+        {
+            if (!g_CameraPanEnabled)
+            {
+                SetCapture(hWnd);
+                g_CameraPanEnabled = true;   
+            }
+        }
+        break;
+    case WM_RBUTTONUP:
+        {
+            if (g_CameraPanEnabled)
+            {
+                ReleaseCapture();
+                g_CameraPanEnabled = false; 
+            }
+        }
+        break;
+        
+    case WM_MOUSEMOVE:
+        {
+            float px = static_cast<float>(GET_X_LPARAM(lParam));
+            float py = static_cast<float>(GET_Y_LPARAM(lParam));
+
+            float mouseDeltaX = px - g_MousePosLastMoveEvent.x;
+            float mouseDeltaY = py - g_MousePosLastMoveEvent.y;
+            
+            if (g_CameraOrbitEnabled)
+            {
+                float orbitDeltaFactorX = Clamp( mouseDeltaX * (1/g_CameraOrbitMaxMouseDelta), -1.0f, 1.0f);
+                float orbitDeltaFactorY = Clamp( mouseDeltaY * (1/g_CameraOrbitMaxMouseDelta), -1.0f, 1.0f);
+
+                g_CameraYaw += orbitDeltaFactorX * g_CameraOrbitMaxSpeed;
+                g_CameraPitch += orbitDeltaFactorY * g_CameraOrbitMaxSpeed;
+            }
+
+            if (g_CameraPanEnabled)
+            {
+                float deltaFactorX = Clamp( mouseDeltaX * (1/g_CameraPanMaxMouseDelta), -1.0f, 1.0f);
+                float deltaFactorY = Clamp( mouseDeltaY * (1/g_CameraPanMaxMouseDelta), -1.0f, 1.0f);
+
+                DirectX::XMMATRIX rotMatrix =
+                    DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(1,0,0,0), DirectX::XMConvertToRadians(g_CameraPitch)) *
+                        DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0,1,0,0), DirectX::XMConvertToRadians(g_CameraYaw));
+                
+                //g_CameraPos.x -= deltaFactorX * g_CameraPanMaxSpeed;
+                //g_CameraPos.y += deltaFactorY * g_CameraPanMaxSpeed;
+
+                DirectX::XMVECTOR panVector = DirectX::XMVector3Transform(DirectX::XMVectorSet(deltaFactorX, deltaFactorY, 0,0), rotMatrix);
+                g_CameraPos = DirectX::XMVectorAdd(g_CameraPos, panVector);
+            }
+
+            g_MousePosLastMoveEvent.x = px; 
+            g_MousePosLastMoveEvent.y = py;  
+        }
         break;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
@@ -1140,7 +1261,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
             if (msg.message == WM_QUIT)
                 break;
         }
-        else { TickSample(); }
+        else
+        {
+            ProcessFrame();
+        }
     }
 
     g_SwapChain->SetFullscreenState(false, nullptr);
