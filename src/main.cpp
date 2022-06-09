@@ -55,11 +55,11 @@ struct FrameConstantBufferData
 };
 
 // Globals
-HWND         g_Window;
-const TCHAR* g_WindowName = L"D3D11SimpleMeshRender";
-const TCHAR* g_WindowClassName = L"D3D11SimpleMeshRenderClass";
-int          g_WindowWidth = 1024; // 759;
-int          g_WindowHeight = 768; // 291;
+HWND         g_MainWindow;
+const TCHAR* g_MainWindowTitleName = L"D3D11SimpleMeshRender";
+const TCHAR* g_MainWindowClassName = L"D3D11SimpleMeshRenderClass";
+int          g_MainWindowWidth = 1024; // 759;
+int          g_MainWindowHeight = 768; // 291;
 
 CComPtr<IDXGISwapChain>          g_SwapChain;
 CComPtr<ID3D11Device>            g_Device;
@@ -165,8 +165,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE     hInstance,
     if (FAILED(hr))
         return hr;
 
-    ShowWindow(g_Window, nShowCmd);
-    UpdateWindow(g_Window);
+    ShowWindow(g_MainWindow, nShowCmd);
+    UpdateWindow(g_MainWindow);
 
     MSG msg;
     while (true)
@@ -271,7 +271,7 @@ HRESULT CreateSwapChain()
     }
 
     RECT rc;
-    GetClientRect(g_Window, &rc);
+    GetClientRect(g_MainWindow, &rc);
     UINT width = rc.right - rc.left;
     UINT height = rc.bottom - rc.top;
 
@@ -286,7 +286,7 @@ HRESULT CreateSwapChain()
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    desc.OutputWindow = g_Window;
+    desc.OutputWindow = g_MainWindow;
     desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     hr = factory->CreateSwapChain(g_Device, &desc, &g_SwapChain);
@@ -1170,7 +1170,7 @@ HRESULT CreateMainWindow(HINSTANCE hInstance)
     wcx.hInstance = hInstance;
     wcx.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wcx.hbrBackground = CreateSolidBrush(RGB(0, 0, 0));
-    wcx.lpszClassName = g_WindowClassName;
+    wcx.lpszClassName = g_MainWindowClassName;
 
     if (!RegisterClassExW(&wcx))
     {
@@ -1178,13 +1178,13 @@ HRESULT CreateMainWindow(HINSTANCE hInstance)
         DEBUG_LOG_FORMAT("Failed register main window class. %s", GetErrorMessage(hr).c_str());
     }
     
-    RECT rc = {0, 0, g_WindowWidth, g_WindowHeight};
+    RECT rc = {0, 0, g_MainWindowWidth, g_MainWindowHeight};
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, false);
 
-    g_Window = CreateWindowEx(
+    g_MainWindow = CreateWindowEx(
         0,
-        g_WindowClassName,
-        g_WindowName,
+        g_MainWindowClassName,
+        g_MainWindowTitleName,
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -1195,7 +1195,7 @@ HRESULT CreateMainWindow(HINSTANCE hInstance)
         hInstance,
         nullptr);
 
-    if (!g_Window)
+    if (!g_MainWindow)
     {
         hr = HRESULT_FROM_WIN32(GetLastError());
         DEBUG_LOG_FORMAT("Failed to create main window. %s", GetErrorMessage(hr).c_str());
