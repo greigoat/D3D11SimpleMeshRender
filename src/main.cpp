@@ -36,11 +36,17 @@ struct DirectionalLightData
     float             m_Attenuation;
 };
 
-struct VertexData
+struct ModelVertex
 {
     DirectX::XMFLOAT3 m_Position;
     DirectX::XMFLOAT3 m_Color;
     DirectX::XMFLOAT3 m_Normal;
+};
+
+struct GridVertex
+{
+    DirectX::XMFLOAT3 m_Position;
+    DirectX::XMFLOAT3 m_Color;
 };
 
 struct FrameConstantBufferData
@@ -50,8 +56,6 @@ struct FrameConstantBufferData
     DirectX::XMMATRIX    m_MvpMatrix;
     DirectX::XMFLOAT4    m_WorldSpaceCameraPos;
     DirectionalLightData m_DirectionalLightData;
-    DirectX::XMFLOAT4    m_FogColor;
-    DirectX::XMFLOAT2    m_FogRange;
 };
 
 // Globals
@@ -76,8 +80,6 @@ FbxSharedDestroyPtr<FbxManager> g_FbxManager;
 CComPtr<ID3D11Buffer> g_FrameConstantBuffer;
 DirectX::XMMATRIX     g_ProjectionMatrix;
 DirectX::XMFLOAT4     g_ClearColor = {0.5f, 0.5f, 0.5f, 1};
-DirectX::XMFLOAT4     g_FogColor = {0.5f, 0.5f, 0.5f, 1};
-DirectX::XMFLOAT2     g_FogRange = {10.0f, 25.0f};
 DirectionalLightData  g_DirectionalLightData
 {
     {1.0f, 1.0f, 1.0f, 1.0f}, // color
@@ -105,7 +107,10 @@ float             g_CameraPanMaxSpeed = 2.0f;
 
 int                         g_GridWidth = 32;
 int                         g_GridLength = 32;
-int                         g_GridVertexCount = g_GridWidth * g_GridLength * 8;
+DirectX::XMFLOAT3           g_GridColor = {0.4f, 0.4f, 0.4f};
+DirectX::XMFLOAT3           g_GridBoldColor = {0.3f, 0.3f, 0.3f};
+const wchar_t*              g_GridShaderFileName = L"Data/Shaders/Color.hlsl";
+int                         g_GridVertexCount = (g_GridWidth + g_GridLength + 2) * 2;
 CComPtr<ID3D11Buffer>       g_GridVertexBuffer;
 CComPtr<ID3D11Buffer>       g_GridIndexBuffer;
 CComPtr<ID3D11VertexShader> g_GridVertexShader;
@@ -113,6 +118,7 @@ CComPtr<ID3D11PixelShader>  g_GridPixelShader;
 CComPtr<ID3D11InputLayout>  g_GridVertexLayout;
 
 const char*                 g_ModelFileName = "Data/Models/Suzanne.fbx";
+const wchar_t*              g_ModelShaderFileName = L"Data/Shaders/BlinnPhong.hlsl";
 int                         g_ModelVertexCount;
 CComPtr<ID3D11VertexShader> g_ModelVertexShader;
 CComPtr<ID3D11PixelShader>  g_ModelPixelShader;
@@ -356,6 +362,16 @@ HRESULT SetUpBackBuffer()
     depthStencilDesc.StencilReadMask = 0xFF;
     depthStencilDesc.StencilWriteMask = 0xFF;
 
+    depthStencilDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_INCR;
+    depthStencilDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    depthStencilDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
+    depthStencilDesc.BackFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    depthStencilDesc.BackFace.StencilDepthFailOp = D3D11_STENCIL_OP_DECR;
+    depthStencilDesc.BackFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    depthStencilDesc.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
     g_Device->CreateDepthStencilState(&depthStencilDesc, &g_DepthStencilState);
     if (FAILED(hr))
     {
@@ -431,7 +447,7 @@ HRESULT CompileShaders(
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed compile vertex shader. %s %s", GetErrorMessage(hr).c_str(),
-                         static_cast<char*>(errors->GetBufferPointer()));
+                         errors.p ? static_cast<char*>(errors->GetBufferPointer()) : "");
         return hr;
     }
 
@@ -448,7 +464,7 @@ HRESULT CompileShaders(
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed compile pixel shader. %s %s", GetErrorMessage(hr).c_str(),
-                         static_cast<char*>(errors->GetBufferPointer()));
+                         errors.p ? static_cast<char*>(errors->GetBufferPointer()) : "");
         return hr;
     }
 
@@ -638,64 +654,48 @@ HRESULT CreateGrid()
 {
     CComPtr<ID3DBlob> vsc, psc;
     
-    HRESULT hr = CompileShaders(L"Data/Shaders/grid.hlsl", &g_GridVertexShader, &g_GridPixelShader, &vsc, &psc);
+    HRESULT hr = CompileShaders(g_GridShaderFileName, &g_GridVertexShader, &g_GridPixelShader, &vsc, &psc);
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed to create grid shaders.");
         return hr;
     }
-    
-    std::vector<DirectX::XMFLOAT3> vertices(g_GridVertexCount);
-    std::vector<uint32_t>          indices(vertices.size());
 
-    // warning ugly code ahead
-    int       index = 0;
     const int halfGridLength = g_GridLength / 2;
     const int halfGridWidth = g_GridWidth / 2;
-    for (int j = -halfGridLength; j < halfGridLength - 1; j++)
+    std::vector<GridVertex> vertices(g_GridVertexCount);
+    std::vector<uint32_t>   indices(g_GridVertexCount);
+
+    int index = 0;
+    for (int z = -halfGridLength; z < halfGridLength + 1; z++)
     {
-        for (int i = -halfGridWidth; i < halfGridWidth - 1; i++)
-        {
-            // Line 1 - Upper left.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f, static_cast<float>(j + 1));
-            indices[index] = index;
-            index++;
-
-            // Line 1 - Upper right.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j + 1));
-            indices[index] = index;
-            index++;
-
-            // Line 2 - Upper right
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j + 1));
-            indices[index] = index;
-            index++;
-
-            // Line 2 - Bottom right.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j));
-            indices[index] = index;
-            index++;
-
-            // Line 3 - Bottom right.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i + 1), 0.0f, static_cast<float>(j));
-            indices[index] = index;
-            index++;
-
-            // Line 3 - Bottom left.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f, static_cast<float>(j));
-            indices[index] = index;
-            index++;
-
-            // Line 4 - Bottom left.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f,  static_cast<float>(j));
-            indices[index] = index;
-            index++;
-
-            // Line 4 - Upper left.
-            vertices[index] = DirectX::XMFLOAT3(static_cast<float>(i), 0.0f, static_cast<float>(j + 1));
-            indices[index] = index;
-            index++;
-        }
+        DirectX::XMFLOAT3 color = z % 5 == 0 ? g_GridBoldColor : g_GridColor;
+        
+        vertices[index].m_Position = {  static_cast<float>(-halfGridWidth), 0, static_cast<float>(z) };
+        vertices[index].m_Color = color;
+        indices[index] = index;
+        index++;
+        
+        vertices[index].m_Position = {  static_cast<float>(halfGridWidth), 0, static_cast<float>(z) };
+        vertices[index].m_Color = color;
+        indices[index] = index;
+        index++;
+    }
+    
+    for (int x = -halfGridWidth; x < halfGridWidth + 1; x++)
+    {
+        DirectX::XMFLOAT3 color = x % 5 == 0 ? g_GridBoldColor : g_GridColor;
+        
+        vertices[index].m_Position = {  static_cast<float>(x), 0, static_cast<float>(-halfGridLength) };
+        vertices[index].m_Color = color;
+        indices[index] = index;
+        index++;
+        
+        vertices[index].m_Position = {  static_cast<float>(x), 0, static_cast<float>(halfGridLength) };
+        vertices[index].m_Color = color;
+        indices[index] = index;
+        
+        index++;
     }
 
     hr = CreateVertexBuffer(vertices, &g_GridVertexBuffer);
@@ -853,7 +853,7 @@ HRESULT CreateModel()
         return E_FAIL;
     }
 
-    std::vector<VertexData> vertices;
+    std::vector<ModelVertex> vertices;
     std::vector<uint32_t>   indices;
 
     FbxVector4* controlPoints = mesh->GetControlPoints();
@@ -883,7 +883,7 @@ HRESULT CreateModel()
             pos = fbxTransform.MultNormalize(pos);
             double* p = pos.mData;
 
-            VertexData vertex;
+            ModelVertex vertex;
             vertex.m_Position =
             {
                 static_cast<float>(p[0]),
@@ -913,7 +913,7 @@ HRESULT CreateModel()
     g_ModelVertexCount = vertices.size();
 
     CComPtr<ID3DBlob> vsCode, psCode;
-    hr = CompileShaders(L"Data/Shaders/shader.hlsl", &g_ModelVertexShader, &g_ModelPixelShader, &vsCode, &psCode);
+    hr = CompileShaders(g_ModelShaderFileName, &g_ModelVertexShader, &g_ModelPixelShader, &vsCode, &psCode);
     if (FAILED(hr))
     {
         DEBUG_LOG_FORMAT("Failed to compile shaders for the model.");
@@ -978,24 +978,22 @@ void ProcessFrame()
     frameCbd.m_ViewMatrix = XMMatrixTranspose(cameraMatrix);
     frameCbd.m_MvpMatrix = XMMatrixTranspose(worldMatrix * cameraMatrix * g_ProjectionMatrix);
     frameCbd.m_DirectionalLightData = g_DirectionalLightData;
-    frameCbd.m_FogColor = g_FogColor;
-    frameCbd.m_FogRange = g_FogRange;
     XMStoreFloat4(&frameCbd.m_WorldSpaceCameraPos, worldSpaceCameraPos);
 
     ctx->UpdateSubresource(g_FrameConstantBuffer, 0, nullptr, &frameCbd, 0, 0);
     
     ctx->OMSetRenderTargets(1, &g_BackBufferView.p, g_DepthStencilView);
 
-    //ctx->OMSetDepthStencilState(g_DepthStencilState, 1);
+    ctx->OMSetDepthStencilState(g_DepthStencilState, 1);
     
-    //ctx->RSSetState(g_RasterizerState);
+    ctx->RSSetState(g_RasterizerState);
 
     ctx->ClearRenderTargetView(g_BackBufferView, reinterpret_cast<FLOAT*>(&g_ClearColor));
     
     ctx->ClearDepthStencilView(g_DepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1, 0);
 
     // Render model
-    constexpr UINT modelBufferStride = sizeof(VertexData);
+    constexpr UINT modelBufferStride = sizeof(ModelVertex);
     constexpr UINT modelBufferOffset = 0;
     ctx->IASetVertexBuffers(0, 1, &g_ModelVertexBuffer.p, &modelBufferStride, &modelBufferOffset);
 
@@ -1016,7 +1014,7 @@ void ProcessFrame()
 
     ctx->UpdateSubresource(g_FrameConstantBuffer, 0, nullptr, &frameCbd, 0, 0);
     
-    constexpr UINT gridBufferStride = sizeof(DirectX::XMFLOAT3);
+    constexpr UINT gridBufferStride = sizeof(GridVertex);
     constexpr UINT gridBufferOffset = 0;
     ctx->IASetVertexBuffers(0, 1, &g_GridVertexBuffer.p, &gridBufferStride, &gridBufferOffset);
     
@@ -1030,7 +1028,7 @@ void ProcessFrame()
 
     ctx->IASetInputLayout(g_GridVertexLayout);
 
-    ctx->DrawIndexed(g_GridWidth * g_GridLength * 8, 0, 0);
+    ctx->DrawIndexed(g_GridVertexCount, 0, 0);
 
     // present the frame
     g_SwapChain->Present(0, 0);

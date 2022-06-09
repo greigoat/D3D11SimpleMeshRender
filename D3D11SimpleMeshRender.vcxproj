@@ -160,8 +160,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Data\Shaders\shader.hlsl" />
-    <ClInclude Include="Data\Shaders\grid.hlsl" />
+    <ClInclude Include="Data\Shaders\BlinnPhong.hlsl" />
+    <ClInclude Include="Data\Shaders\Color.hlsl" />
     <ClInclude Include="Data\Shaders\shared.hlsli" />
   </ItemGroup>
   <ItemGroup>

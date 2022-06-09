@@ -26,8 +26,6 @@ PSInput VSMain(VSInput IN)
     OUT.position = mul(temp, wvpMatrix);
     
     float3 worldPosition = mul(temp, worldMatrix);
-    //OUT.worldPosition = mul(temp, worldMatrix);
-
     OUT.viewDir = normalize(worldSpaceCameraPos.xyz - worldPosition);
     
     OUT.normal = mul(IN.normal, worldMatrix);
@@ -43,13 +41,10 @@ float4 PSMain(PSInput IN) : SV_TARGET
     float3 lightDirection = -directionalLightData.direction;
     
     float NDotL = saturate(dot(normalDirection,lightDirection));
-    //NDotL = pow(NDotL * 0.5 + 0.5,2.0); // shift light range
+    //NDotL = pow(NDotL * 0.5 + 0.5,2.0); // uncomment for half-lambert
     
     float3 viewDirection = IN.viewDir;
     float3 halfDirection = normalize(viewDirection+lightDirection); 
-    
-   // float3 lightReflectDirection = reflect( -lightDirection, normalDirection );
-    //float RDotV = saturate(dot(lightReflectDirection,viewDirection));
 
     float NDotV = max(0, dot( normalDirection, halfDirection ));
     
@@ -57,8 +52,8 @@ float4 PSMain(PSInput IN) : SV_TARGET
     float lightingModel = NDotL * diffuseColor + specularity;
 
     float attenuation= directionalLightData.attenuation;
-    float3 attenColor = attenuation * directionalLightData.color.rgb;
-    float3 finalDiffuse = float4(lightingModel * attenColor,1);
+    float3 attenuationColor = attenuation * directionalLightData.color.rgb;
+    float3 finalDiffuse = float4(lightingModel * attenuationColor,1);
     
     return float4 (finalDiffuse, 1);
 }

@@ -13,6 +13,4 @@ cbuffer PerFrameBuffer : register(b0)
     matrix wvpMatrix;
     float4 worldSpaceCameraPos;
     DirectionalLightData directionalLightData;
-    float4 fogColor;
-    float2 fogRange;
 }
