@@ -100,7 +100,7 @@ DirectX::XMVECTOR g_CameraPos = DirectX::XMVectorSet(0, 0, 0, 0);
 float             g_CameraZoomZ = -2.5f;
 float             g_CameraPitch = 20.0f;
 float             g_CameraYaw = 0.0f;
-float             g_CameraZoomMaxSpeed = 0.25f;
+float             g_CameraZoomMaxSpeed = 0.15f;
 float             g_CameraZoomMaxScrollDelta = 120;
 bool              g_CameraOrbitEnabled = false;
 float             g_CameraOrbitMaxMouseDelta = 10;
@@ -893,6 +893,53 @@ HRESULT CreateModelShadersAndLayout()
     return hr;
 }
 
+bool GetFbxMeshNormal(FbxMesh* mesh, FbxVector4& outNormal, int vertexIndex)
+{
+    FbxGeometryElementNormal* lNormalElement = mesh->GetElementNormal();
+
+    if (!lNormalElement)
+    {
+        return false;
+    }
+    
+    FbxLayerElement::EMappingMode normalsMappingMode = lNormalElement->GetMappingMode();
+    if (normalsMappingMode == FbxGeometryElement::eByControlPoint)
+    {
+        int lNormalIndex = 0;
+        //reference mode is direct, the normal index is same as vertex index.
+        //get normals by the index of control vertex
+        if( lNormalElement->GetReferenceMode() == FbxGeometryElement::eDirect )
+            lNormalIndex = vertexIndex;
+
+        //reference mode is index-to-direct, get normals by the index-to-direct
+        if(lNormalElement->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+            lNormalIndex = lNormalElement->GetIndexArray().GetAt(lNormalIndex);
+
+        //Got normals of each vertex.
+        outNormal = lNormalElement->GetDirectArray().GetAt(lNormalIndex);
+
+        return true;
+    }
+    else if (normalsMappingMode == FbxGeometryElement::eByPolygonVertex)
+    {
+        int lNormalIndex = 0;
+        //reference mode is direct, the normal index is same as lIndexByPolygonVertex.
+        if (lNormalElement->GetReferenceMode() == FbxGeometryElement::eDirect)
+            lNormalIndex = vertexIndex;
+
+        //reference mode is index-to-direct, get normals by the index-to-direct
+        if (lNormalElement->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+            lNormalIndex = lNormalElement->GetIndexArray().GetAt(vertexIndex);
+
+        //Got normals of each polygon-vertex.
+        outNormal = lNormalElement->GetDirectArray().GetAt(lNormalIndex);
+
+        return true;
+    }
+
+    return false;
+}
+
 HRESULT CreateModel()
 {
     HRESULT hr = S_OK;
@@ -966,6 +1013,69 @@ HRESULT CreateModel()
         return E_FAIL;
     }
 
+    mesh->GenerateNormals();
+    
+    int materialCount = meshNode->GetSrcObjectCount<FbxSurfaceMaterial>();
+    for (int i = 0; i < materialCount; ++i)
+    {
+        FbxSurfaceMaterial* material = meshNode->GetSrcObject<FbxSurfaceMaterial>(i);
+
+        if (material)
+        {
+            // This only gets the material of type sDiffuse, you probably need to traverse all Standard Material Property by its name to get all possible textures.
+            FbxProperty prop = material->FindProperty(FbxSurfaceMaterial::sDiffuse);
+
+            // Check if it's layeredtextures
+            int layeredTextureCount = prop.GetSrcObjectCount<FbxLayeredTexture>();
+
+            if (layeredTextureCount > 0)
+            {
+                for (int j = 0; j < layeredTextureCount; j++)
+                {
+                    FbxLayeredTexture* layered_texture = FbxCast<FbxLayeredTexture>(
+                        prop.GetSrcObject<FbxLayeredTexture>(j));
+                    int lcount = layered_texture->GetSrcObjectCount<FbxTexture>();
+
+                    for (int k = 0; k < lcount; k++)
+                    {
+                        FbxTexture* texture = FbxCast<FbxTexture>(layered_texture->GetSrcObject<FbxTexture>(k));
+                        // Then, you can get all the properties of the texture, include its name
+                        const char* textureName = texture->GetName();
+                    }
+                }
+            }
+            else
+            {
+                // Directly get textures
+                int textureCount = prop.GetSrcObjectCount<FbxTexture>();
+                for (int j = 0; j < textureCount; j++)
+                {
+                    FbxTexture* texture = FbxCast<FbxTexture>(prop.GetSrcObject<FbxTexture>(j));
+                    
+                    // Then, you can get all the properties of the texture, include its name
+                    /*const char* textureName = texture->GetName();
+                    LOG(INFO) << textureName;
+
+                    FbxProperty p = texture->RootProperty.Find("Filename");
+                    LOG(INFO) << p.Get<FbxString>() << std::endl;
+
+
+                    HRESULT hr;
+                    D3DX11CreateTextureFromFile(Game::GetInstance()->GetRenderer()->GetDevice(), textureName, 0, 0,
+                                                &m_texture, &hr);
+                    if (FAILED(hr))
+                    {
+                        std::string message;
+                        message.append("Load Texture: ");
+                        message.append(texture->GetName());
+                        message.append(" failed");
+                        SHOWMESSAGEBOX(hr, message.c_str());
+                    }*/
+                }
+            }
+        }
+    }
+    
     std::vector<ModelVertex> vertices;
     std::vector<uint32_t>   indices;
 
@@ -978,7 +1088,7 @@ HRESULT CreateModel()
     FbxMatrix m(FbxVector4(), FbxVector4(0, 180, 0), FbxVector4(1, 1, -1));
     fbxTransform *= m;
 
-    int vertexCounter = 0;
+    int vertexIndex = 0;
     for (int j = 0; j < polyCount; j++)
     {
         int iNumVertices = mesh->GetPolygonSize(j);
@@ -1003,14 +1113,22 @@ HRESULT CreateModel()
                 static_cast<float>(p[1]),
                 static_cast<float>(p[2])
             };
-
+            
             FbxVector4 fbxNormal;
-            mesh->GetPolygonVertexNormal(j, k, fbxNormal);
+            if (!GetFbxMeshNormal(mesh, fbxNormal, vertexIndex))
+            {
+                FbxVector4 p0 = controlPoints[mesh->GetPolygonVertex(j, 0)];
+                FbxVector4 p1 = controlPoints[mesh->GetPolygonVertex(j, 1)];
+                FbxVector4 p2 = controlPoints[mesh->GetPolygonVertex(j, 2)];
+
+                fbxNormal = (p1 - p0).CrossProduct(p2 - p0);
+            }
+            //mesh->GetPolygonVertexNormal(j, k, fbxNormal);
 
             // convert to normals to left handed
             fbxNormal = m.MultNormalize(fbxNormal);
 
-            vertex.m_Color = GetFbxMeshPolygonVertexColor(mesh, vertexCounter, iControlPointIndex);
+            vertex.m_Color = GetFbxMeshPolygonVertexColor(mesh, vertexIndex, iControlPointIndex);
 
             vertex.m_Normal = DirectX::XMFLOAT3(
                 static_cast<float>(fbxNormal.mData[0]),
@@ -1019,7 +1137,7 @@ HRESULT CreateModel()
 
             vertices.push_back(vertex);
 
-            vertexCounter++;
+            vertexIndex++;
         }
     }
 
@@ -1071,7 +1189,7 @@ void ProcessFrame()
 
     cameraMatrix = DirectX::XMMatrixInverse(nullptr, cameraMatrix);
 
-    DirectX::XMVECTOR cameraDir = DirectX::XMVector4Normalize(DirectX::XMVectorNegate(worldSpaceCameraPos));
+    DirectX::XMVECTOR cameraDir = DirectX::XMVector3Normalize(DirectX::XMVectorNegate(worldSpaceCameraPos));
     DirectX::XMStoreFloat3(&g_DirectionalLightData.m_Direction, cameraDir);
 
     FrameConstantBufferData frameCbd = {};
